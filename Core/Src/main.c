@@ -22,7 +22,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "odrive_can.h"
+//#include "odrive_can.h"
+#include "vesc_can.h"
 #include "winch.h"
 #include "lunanet_wrapper.h"
 #include "lunaterm.h"
@@ -113,7 +114,8 @@ int main(void)
   MX_ICACHE_Init();
   //HAL_Delay(1000); //Don't question this, and DO NOT REMOVE (PLL startup messes with ethernet)
   MX_ETH_Init();
-  MX_FDCAN1_Init();
+  //MX_FDCAN1_Init();
+  ALT_MX_FDCAN1_Init(&hfdcan1);
   MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
 
@@ -142,9 +144,10 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 	WinchInit();
-	if(OdriveInit(&hfdcan1) != 0){
-		Error_Handler();
-	}
+	//if(OdriveInit(&hfdcan1) != 0){
+	//	Error_Handler();
+	//}
+	VescInit(&hfdcan1);
 	NetworkInit();
 	LunaTermInit();
 	ControllerInit();
@@ -155,7 +158,8 @@ int main(void)
   while (1)
   {
     WinchPoll();
-    OdrivePoll();
+    //OdrivePoll();
+    VescPoll();
     NetworkPoll();
     LunaTermPoll();
     ControllerPoll();

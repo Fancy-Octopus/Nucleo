@@ -9,7 +9,7 @@
 #include "main.h"
 #include "luna_wait.h"
 
-#define ROVER_COMMAND_INTERVAL_MAX 500
+#define ROVER_COMMAND_INTERVAL_MAX 10000
 
 static rover_state_t roverState = ROVER_IDLE;
 static rover_state_t defaultState = ROVER_IDLE;

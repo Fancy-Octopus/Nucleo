@@ -11,6 +11,7 @@
 #include "lwip/debug.h"
 #include "lwip/stats.h"
 #include "rover_controller.h"
+#include "main.h"
 #include <string.h>
 
 

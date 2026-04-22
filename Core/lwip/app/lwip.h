@@ -12,7 +12,7 @@
 /*Static IP ADDRESS: IP_ADDR0.IP_ADDR1.IP_ADDR2.IP_ADDR3 */
 #define IP_ADDR0   ((uint8_t) 192U)
 #define IP_ADDR1   ((uint8_t) 168U)
-#define IP_ADDR2   ((uint8_t) 123U)
+#define IP_ADDR2   ((uint8_t) 8U)
 #define IP_ADDR3   ((uint8_t) 101U)
 /*NETMASK*/
 #define NETMASK_ADDR0   ((uint8_t) 255U)
