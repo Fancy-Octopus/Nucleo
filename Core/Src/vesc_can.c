@@ -23,7 +23,7 @@
 
 #define VESC_WHEEL_SPEED 5000.0f
 #define VESC_DRUM_SPEED  5000.0f
-#define VESC_POLL_RATE   500      //ms
+#define VESC_POLL_TIME   500      //ms
 
 /* --------------------------------------------------------------------------
  * VESC CAN packet types
@@ -48,7 +48,7 @@ static FDCAN_HandleTypeDef *vescCanHandle = NULL;
 static schedule_t           canbus_schedule;
 
 /* --------------------------------------------------------------------------
- * Buffer helpers
+ * Buffer helpers (private)
  * -------------------------------------------------------------------------- */
 static void buffer_append_int16(uint8_t *buffer, int16_t number, int32_t *index)
 {
@@ -76,14 +76,11 @@ static void buffer_append_float32(uint8_t *buffer, float number, float scale, in
 
 /* --------------------------------------------------------------------------
  * Hardware register configuration
- * Does NOT start the peripheral - that is handled by CAN_HardwareInit()
- * in can_queue.c after this function returns.
  *
- * Typical call sequence in main.c:
- *   ALT_MX_FDCAN1_Init(&hfdcan1);
- *   CAN_HardwareInit(&hfdcan1, FDCAN1_IT0_IRQn, 5);
- *   CanQueue_Init();
- *   VescInit(&hfdcan1);
+ * Configures FDCAN1 peripheral registers only.
+ * Does NOT start the peripheral - CAN_HardwareInit() handles NVIC and
+ * notifications, CAN_HardwareStart() is called inside VescInit() after
+ * filters are configured.
  * -------------------------------------------------------------------------- */
 void ALT_MX_FDCAN1_Init(FDCAN_HandleTypeDef *hfdcan1)
 {
@@ -114,13 +111,13 @@ void ALT_MX_FDCAN1_Init(FDCAN_HandleTypeDef *hfdcan1)
 
 /* --------------------------------------------------------------------------
  * VESC specific initialisation
- * Stores the handle and configures RX filters.
+ *
+ * Stores the handle, configures RX filters, then starts the peripheral.
+ * Must be called after CAN_HardwareInit() and CanQueue_Init().
  * Returns 0 on success, 1 on any HAL error.
  * -------------------------------------------------------------------------- */
 int VescInit(FDCAN_HandleTypeDef *hfdcan)
 {
-    SetScheduledTime(&canbus_schedule, VESC_POLL_RATE);
-
     FDCAN_FilterTypeDef sFilterConfig;
 
     vescCanHandle = hfdcan;
@@ -134,10 +131,14 @@ int VescInit(FDCAN_HandleTypeDef *hfdcan)
 
     if(HAL_FDCAN_ConfigFilter(vescCanHandle, &sFilterConfig) != HAL_OK) return 1;
 
-    /* Reject anything that does not match a filter */
     if(HAL_FDCAN_ConfigGlobalFilter(vescCanHandle,
             FDCAN_REJECT, FDCAN_REJECT,
             FDCAN_FILTER_REMOTE, FDCAN_FILTER_REMOTE) != HAL_OK) return 1;
+
+    /* Start the peripheral now that filters are configured */
+    //CAN_HardwareStart(vescCanHandle);
+
+    SetScheduledTime(&canbus_schedule, VESC_POLL_TIME);
 
     return 0;
 }
@@ -147,6 +148,7 @@ int VescInit(FDCAN_HandleTypeDef *hfdcan)
  * -------------------------------------------------------------------------- */
 void VescPoll(void)
 {
+    if(vescCanHandle == NULL)           return;
     if(!ScheduleReady(canbus_schedule)) return;
 
     ResetSchedule(&canbus_schedule);
@@ -214,6 +216,7 @@ void VescPoll(void)
  * -------------------------------------------------------------------------- */
 void comm_can_set_duty(uint8_t controller_id, float duty)
 {
+    if(vescCanHandle == NULL) return;
     int32_t send_index = 0;
     uint8_t buffer[4];
     buffer_append_int32(buffer, (int32_t)(duty * 100000.0f), &send_index);
@@ -222,6 +225,7 @@ void comm_can_set_duty(uint8_t controller_id, float duty)
 
 void comm_can_set_current(uint8_t controller_id, float current)
 {
+    if(vescCanHandle == NULL) return;
     int32_t send_index = 0;
     uint8_t buffer[4];
     buffer_append_int32(buffer, (int32_t)(current * 1000.0f), &send_index);
@@ -230,6 +234,7 @@ void comm_can_set_current(uint8_t controller_id, float current)
 
 void comm_can_set_current_off_delay(uint8_t controller_id, float current, float off_delay)
 {
+    if(vescCanHandle == NULL) return;
     int32_t send_index = 0;
     uint8_t buffer[6];
     buffer_append_int32(buffer, (int32_t)(current * 1000.0f), &send_index);
@@ -239,6 +244,7 @@ void comm_can_set_current_off_delay(uint8_t controller_id, float current, float 
 
 void comm_can_set_current_brake(uint8_t controller_id, float current)
 {
+    if(vescCanHandle == NULL) return;
     int32_t send_index = 0;
     uint8_t buffer[4];
     buffer_append_int32(buffer, (int32_t)(current * 1000.0f), &send_index);
@@ -247,6 +253,7 @@ void comm_can_set_current_brake(uint8_t controller_id, float current)
 
 void comm_can_set_rpm(uint8_t controller_id, float rpm)
 {
+    if(vescCanHandle == NULL) return;
     int32_t send_index = 0;
     uint8_t buffer[4];
     buffer_append_int32(buffer, (int32_t)rpm, &send_index);
@@ -255,6 +262,7 @@ void comm_can_set_rpm(uint8_t controller_id, float rpm)
 
 void comm_can_set_pos(uint8_t controller_id, float pos)
 {
+    if(vescCanHandle == NULL) return;
     int32_t send_index = 0;
     uint8_t buffer[4];
     buffer_append_int32(buffer, (int32_t)(pos * 1000000.0f), &send_index);
@@ -263,6 +271,7 @@ void comm_can_set_pos(uint8_t controller_id, float pos)
 
 void comm_can_set_current_rel(uint8_t controller_id, float current_rel)
 {
+    if(vescCanHandle == NULL) return;
     int32_t send_index = 0;
     uint8_t buffer[4];
     buffer_append_float32(buffer, current_rel, 1e5f, &send_index);
@@ -271,6 +280,7 @@ void comm_can_set_current_rel(uint8_t controller_id, float current_rel)
 
 void comm_can_set_current_rel_off_delay(uint8_t controller_id, float current_rel, float off_delay)
 {
+    if(vescCanHandle == NULL) return;
     int32_t send_index = 0;
     uint8_t buffer[6];
     buffer_append_float32(buffer, current_rel, 1e5f, &send_index);
@@ -280,6 +290,7 @@ void comm_can_set_current_rel_off_delay(uint8_t controller_id, float current_rel
 
 void comm_can_set_current_brake_rel(uint8_t controller_id, float current_rel)
 {
+    if(vescCanHandle == NULL) return;
     int32_t send_index = 0;
     uint8_t buffer[4];
     buffer_append_float32(buffer, current_rel, 1e5f, &send_index);
@@ -288,6 +299,7 @@ void comm_can_set_current_brake_rel(uint8_t controller_id, float current_rel)
 
 void comm_can_set_handbrake(uint8_t controller_id, float current)
 {
+    if(vescCanHandle == NULL) return;
     int32_t send_index = 0;
     uint8_t buffer[4];
     buffer_append_float32(buffer, current, 1e3f, &send_index);
@@ -296,6 +308,7 @@ void comm_can_set_handbrake(uint8_t controller_id, float current)
 
 void comm_can_set_handbrake_rel(uint8_t controller_id, float current_rel)
 {
+    if(vescCanHandle == NULL) return;
     int32_t send_index = 0;
     uint8_t buffer[4];
     buffer_append_float32(buffer, current_rel, 1e5f, &send_index);

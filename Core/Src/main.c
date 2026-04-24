@@ -150,7 +150,7 @@ int main(void)
 	//}
 	CAN_HardwareInit(&hfdcan1, FDCAN1_IT0_IRQn, 5);  // start + enable IRQ
 	CanQueue_Init();
-	if(VescInit(&hfdcan1) != 0) Error_Handler();         // filters configured while stopped
+	if(VescInit(&hfdcan1) != 0) Error_Handler();
 	NetworkInit();
 	LunaTermInit();
 	ControllerInit();
@@ -170,6 +170,7 @@ int main(void)
     ControllerPoll();
     SteeringPoll();
     CameraServoPoll();
+    CAN_BusRecoveryPoll();
     if(ScheduleReady(toggleLEDs)){
     	SetScheduledTime(&toggleLEDs,500);
     	//BSP_LED_Toggle(LED_RED); //uncomment this for power/program testing

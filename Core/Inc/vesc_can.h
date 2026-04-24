@@ -11,19 +11,38 @@
 #include "stm32h5xx_hal.h"
 #include "can_queue.h"
 
-/* Performs the FDCAN1 peripheral register configuration.
- * Pass the handle that was declared in main.c.
- * Does NOT start the peripheral - call CAN_HardwareInit() afterwards. */
+/* --------------------------------------------------------------------------
+ * Initialisation
+ *
+ * ALT_MX_FDCAN1_Init() - configures FDCAN1 peripheral registers.
+ *                         Call before CAN_HardwareInit().
+ *
+ * VescInit()            - stores the handle, configures RX filters, then
+ *                         calls CAN_HardwareStart() internally. Must be
+ *                         called after CAN_HardwareInit() and CanQueue_Init().
+ *
+ * Full sequence in main.c:
+ *
+ *   ALT_MX_FDCAN1_Init(&hfdcan1);
+ *   CAN_HardwareInit(&hfdcan1, FDCAN1_IT0_IRQn, 5);
+ *   CanQueue_Init();
+ *   VescInit(&hfdcan1);
+ *
+ * Main loop:
+ *
+ *   VescPoll();
+ *   CAN_BusRecoveryPoll();
+ *   CanQueue_Poll();
+ * -------------------------------------------------------------------------- */
 void ALT_MX_FDCAN1_Init(FDCAN_HandleTypeDef *hfdcan1);
-
-/* Stores the FDCAN handle for use by VESC transmit functions and
- * configures RX filters. Call after CAN_HardwareInit(). */
 int  VescInit(FDCAN_HandleTypeDef *hfdcan);
 
 /* Call from the main polling loop */
 void VescPoll(void);
 
-/* VESC FDCAN command set */
+/* --------------------------------------------------------------------------
+ * VESC CAN command set
+ * -------------------------------------------------------------------------- */
 void comm_can_set_duty(uint8_t controller_id, float duty);
 void comm_can_set_current(uint8_t controller_id, float current);
 void comm_can_set_current_off_delay(uint8_t controller_id, float current, float off_delay);
