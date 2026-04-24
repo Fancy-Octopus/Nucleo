@@ -11,6 +11,7 @@
 #include "lunautils.h"
 #include "luna_wait.h"
 #include "rover_controller.h"
+#include "stm32h5xx_hal.h"
 
 
 #define VESC_FR (uint8_t) 5
@@ -82,11 +83,12 @@ void ALT_MX_FDCAN1_Init(FDCAN_HandleTypeDef *hfdcan1) {
   {
     Error_Handler();
   }
+
 }
 
-int VescInit(FDCAN_HandleTypeDef *hfdcan){
+int VescInit(FDCAN_HandleTypeDef *fdcan1){
   FDCAN_FilterTypeDef sFilterConfig;
-  vescCanHandle = hfdcan;
+  vescCanHandle = fdcan1;
 
   sFilterConfig.IdType       = FDCAN_EXTENDED_ID;
   sFilterConfig.FilterIndex  = 0;
@@ -109,7 +111,7 @@ int VescInit(FDCAN_HandleTypeDef *hfdcan){
     return 1;
   }
 
-  SetScheduledTime(&canbus_schedule, 100);
+  SetScheduledTime(&canbus_schedule, 1000);
 
   return 0;
 }
