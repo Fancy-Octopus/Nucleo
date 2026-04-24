@@ -24,6 +24,7 @@
 /* USER CODE BEGIN Includes */
 //#include "odrive_can.h"
 #include "vesc_can.h"
+#include "can_queue.h"
 #include "winch.h"
 #include "lunanet_wrapper.h"
 #include "lunaterm.h"
@@ -115,7 +116,7 @@ int main(void)
   //HAL_Delay(1000); //Don't question this, and DO NOT REMOVE (PLL startup messes with ethernet)
   MX_ETH_Init();
   //MX_FDCAN1_Init();
-  ALT_MX_FDCAN1_Init(&hfdcan1);
+  ALT_MX_FDCAN1_Init(&hfdcan1);  // Rewrote MX-init function, is now inside vesc_can.c
   MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
 
@@ -147,11 +148,15 @@ int main(void)
 	//if(OdriveInit(&hfdcan1) != 0){
 	//	Error_Handler();
 	//}
-	VescInit(&hfdcan1);
+	CAN_HardwareInit(&hfdcan1, FDCAN1_IT0_IRQn, 5);  // start + enable IRQ
+	CanQueue_Init();
+	if(VescInit(&hfdcan1) != 0) Error_Handler();         // filters configured while stopped
 	NetworkInit();
 	LunaTermInit();
 	ControllerInit();
 	InitCameraServo();
+
+	CAN_HardwareStart(&hfdcan1);
 
   schedule_t toggleLEDs;
   SetScheduledTime(&toggleLEDs,500);

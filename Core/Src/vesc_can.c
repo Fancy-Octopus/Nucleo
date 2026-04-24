@@ -5,306 +5,299 @@
  *      Author: gruetzmacherg
  */
 
-
 #include "vesc_can.h"
 #include "string.h"
 #include "lunautils.h"
 #include "luna_wait.h"
 #include "rover_controller.h"
-#include "stm32h5xx_hal.h"
 
-
+/* --------------------------------------------------------------------------
+ * VESC node IDs
+ * -------------------------------------------------------------------------- */
 #define VESC_FR (uint8_t) 5
 #define VESC_FL (uint8_t) 74
 #define VESC_BR (uint8_t) 6
 #define VESC_BL (uint8_t) 1
 #define VESC_FD (uint8_t) 83
 #define VESC_BD (uint8_t) 104
-#define VESC_WHEEL_SPEED 5000.0
-#define VESC_DRUM_SPEED 5000.0
 
+#define VESC_WHEEL_SPEED 5000.0f
+#define VESC_DRUM_SPEED  5000.0f
+#define VESC_POLL_RATE   500      //ms
+
+/* --------------------------------------------------------------------------
+ * VESC CAN packet types
+ * -------------------------------------------------------------------------- */
 typedef enum {
-  CAN_PACKET_SET_DUTY = 0,
-  CAN_PACKET_SET_CURRENT,
-  CAN_PACKET_SET_CURRENT_BRAKE,
-  CAN_PACKET_SET_RPM,
-  CAN_PACKET_SET_POS,
-  CAN_PACKET_SET_CURRENT_REL = 10,
-  CAN_PACKET_SET_CURRENT_BRAKE_REL,
-  CAN_PACKET_SET_CURRENT_HANDBRAKE,
-  CAN_PACKET_SET_CURRENT_HANDBRAKE_REL,
-  CAN_PACKET_MAKE_ENUM_32_BITS = 0xFFFFFFFF,
+    CAN_PACKET_SET_DUTY                  = 0,
+    CAN_PACKET_SET_CURRENT               = 1,
+    CAN_PACKET_SET_CURRENT_BRAKE         = 2,
+    CAN_PACKET_SET_RPM                   = 3,
+    CAN_PACKET_SET_POS                   = 4,
+    CAN_PACKET_SET_CURRENT_REL           = 10,
+    CAN_PACKET_SET_CURRENT_BRAKE_REL     = 11,
+    CAN_PACKET_SET_CURRENT_HANDBRAKE     = 12,
+    CAN_PACKET_SET_CURRENT_HANDBRAKE_REL = 13,
+    CAN_PACKET_MAKE_ENUM_32_BITS         = 0xFFFFFFFF,
 } CAN_PACKET_ID;
 
+/* --------------------------------------------------------------------------
+ * Module state
+ * -------------------------------------------------------------------------- */
+static FDCAN_HandleTypeDef *vescCanHandle = NULL;
+static schedule_t           canbus_schedule;
 
-static FDCAN_HandleTypeDef* vescCanHandle = NULL;
-static schedule_t canbus_schedule;
-
-
-void SetRPM(uint8_t vescID, uint32_t rpm);
-void can_transmit_eid(uint32_t id, const uint8_t *data, uint8_t len);
-void buffer_append_int16(uint8_t* buffer, int16_t number, int32_t *index);
-void buffer_append_int32(uint8_t* buffer, int32_t number, int32_t *index);
-void buffer_append_float16(uint8_t* buffer, float number, float scale, int32_t *index);
-void buffer_append_float32(uint8_t* buffer, float number, float scale, int32_t *index);
-void comm_can_set_duty(uint8_t controller_id, float duty);
-void comm_can_set_current(uint8_t controller_id, float current);
-void comm_can_set_current_off_delay(uint8_t controller_id, float current, float off_delay);
-void comm_can_set_current_brake(uint8_t controller_id, float current);
-void comm_can_set_rpm(uint8_t controller_id, float rpm);
-void comm_can_set_pos(uint8_t controller_id, float pos);
-void comm_can_set_current_rel(uint8_t controller_id, float current_rel);
-void comm_can_set_current_rel_off_delay(uint8_t controller_id, float current_rel, float off_delay);
-void comm_can_set_current_brake_rel(uint8_t controller_id, float current_rel);
-void comm_can_set_handbrake(uint8_t controller_id, float current);
-void comm_can_set_handbrake_rel(uint8_t controller_id, float current_rel);
-
-
-void ALT_MX_FDCAN1_Init(FDCAN_HandleTypeDef *hfdcan1) {
-  hfdcan1->Instance = FDCAN1;
-  hfdcan1->Init.ClockDivider = FDCAN_CLOCK_DIV1;
-  hfdcan1->Init.FrameFormat = FDCAN_FRAME_CLASSIC;
-  hfdcan1->Init.Mode = FDCAN_MODE_NORMAL;
-  hfdcan1->Init.AutoRetransmission = ENABLE;
-  hfdcan1->Init.TransmitPause = DISABLE;
-  hfdcan1->Init.ProtocolException = DISABLE;
-  hfdcan1->Init.NominalPrescaler = 1;
-  hfdcan1->Init.NominalSyncJumpWidth = 2;
-  hfdcan1->Init.NominalTimeSeg1 = 13;
-  hfdcan1->Init.NominalTimeSeg2 = 2;
-  hfdcan1->Init.DataPrescaler = 1;
-  hfdcan1->Init.DataSyncJumpWidth = 1;
-  hfdcan1->Init.DataTimeSeg1 = 1;
-  hfdcan1->Init.DataTimeSeg2 = 1;
-  hfdcan1->Init.StdFiltersNbr = 1;
-  hfdcan1->Init.ExtFiltersNbr = 1;
-  hfdcan1->Init.TxFifoQueueMode = FDCAN_TX_FIFO_OPERATION;
-  if (HAL_FDCAN_Init(hfdcan1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
+/* --------------------------------------------------------------------------
+ * Buffer helpers
+ * -------------------------------------------------------------------------- */
+static void buffer_append_int16(uint8_t *buffer, int16_t number, int32_t *index)
+{
+    buffer[(*index)++] = number >> 8;
+    buffer[(*index)++] = number;
 }
 
-int VescInit(FDCAN_HandleTypeDef *fdcan1){
-  FDCAN_FilterTypeDef sFilterConfig;
-  vescCanHandle = fdcan1;
-
-  sFilterConfig.IdType       = FDCAN_EXTENDED_ID;
-  sFilterConfig.FilterIndex  = 0;
-  sFilterConfig.FilterType   = FDCAN_FILTER_MASK;
-  sFilterConfig.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
-  sFilterConfig.FilterID1    = 0; //For Now ACCEPT EVERYTHING. We will check the ID in receive fx
-  sFilterConfig.FilterID2    = 0;
-
-
-  if (HAL_FDCAN_ConfigFilter(vescCanHandle, &sFilterConfig) != HAL_OK){
-    return 1;
-  }
-
-  //Configures the behavior of filters when the can ID doesn't match. We will reject everything.
-  if (HAL_FDCAN_ConfigGlobalFilter(vescCanHandle,FDCAN_REJECT, FDCAN_REJECT, FDCAN_FILTER_REMOTE, FDCAN_FILTER_REMOTE) != HAL_OK){
-    return 1;
-  }
-
-  if (HAL_FDCAN_Start(vescCanHandle) != HAL_OK){
-    return 1;
-  }
-
-  SetScheduledTime(&canbus_schedule, 1000);
-
-  return 0;
+static void buffer_append_int32(uint8_t *buffer, int32_t number, int32_t *index)
+{
+    buffer[(*index)++] = number >> 24;
+    buffer[(*index)++] = number >> 16;
+    buffer[(*index)++] = number >> 8;
+    buffer[(*index)++] = number;
 }
 
-void VescPoll(void) {
-  //static rover_state_t state = ROVER_IDLE;
-  //rover_state_t nextState = CurrentRoverState();
-
-  if(ScheduleReady(canbus_schedule)) {
-    ResetSchedule(&canbus_schedule);
-
-  switch(CurrentRoverState()) {
-    case ROVER_IDLE:
-    case ROVER_READY:
-      comm_can_set_rpm(VESC_FR, 0.0);
-      comm_can_set_rpm(VESC_FL, 0.0);
-      comm_can_set_rpm(VESC_BR, 0.0);
-      comm_can_set_rpm(VESC_BL, 0.0);
-      //comm_can_set_rpm(VESC_FD, 0.0);
-      //comm_can_set_rpm(VESC_BD, 0.0);
-      break;
-    case ROVER_FORWARD:
-      comm_can_set_rpm(VESC_FR, VESC_WHEEL_SPEED);
-      comm_can_set_rpm(VESC_FL, VESC_WHEEL_SPEED);
-      comm_can_set_rpm(VESC_BR, VESC_WHEEL_SPEED);
-      comm_can_set_rpm(VESC_BL, VESC_WHEEL_SPEED);
-      //comm_can_set_rpm(VESC_FD, 0.0);
-      //comm_can_set_rpm(VESC_BD, 0.0);
-      break;
-    case ROVER_BACKWARD:
-      comm_can_set_rpm(VESC_FR, -VESC_WHEEL_SPEED);
-      comm_can_set_rpm(VESC_FL, -VESC_WHEEL_SPEED);
-      comm_can_set_rpm(VESC_BR, -VESC_WHEEL_SPEED);
-      comm_can_set_rpm(VESC_BL, -VESC_WHEEL_SPEED);
-      //comm_can_set_rpm(VESC_FD, 0.0);
-      //comm_can_set_rpm(VESC_BD, 0.0);
-      break;
-    case ROVER_DIG_FORWARD:
-    case ROVER_DIG_BACKWARD:
-      comm_can_set_rpm(VESC_FR, 0.0);
-      comm_can_set_rpm(VESC_FL, 0.0);
-      comm_can_set_rpm(VESC_BR, 0.0);
-      comm_can_set_rpm(VESC_BL, 0.0);
-      //comm_can_set_rpm(VESC_FD, VESC_DRUM_SPEED);
-      //comm_can_set_rpm(VESC_BD, VESC_DRUM_SPEED);
-      break;
-    case ROVER_DEPOSIT_FORWARD:
-      comm_can_set_rpm(VESC_FR, 0.0);
-      comm_can_set_rpm(VESC_FL, 0.0);
-      comm_can_set_rpm(VESC_BR, 0.0);
-      comm_can_set_rpm(VESC_BL, 0.0);
-      //comm_can_set_rpm(VESC_FD, -VESC_DRUM_SPEED);
-      //comm_can_set_rpm(VESC_BD, 0.0);
-      break;
-    case ROVER_DEPOSIT_BACKWARD:
-      comm_can_set_rpm(VESC_FR, 0.0);
-      comm_can_set_rpm(VESC_FL, 0.0);
-      comm_can_set_rpm(VESC_BR, 0.0);
-      comm_can_set_rpm(VESC_BL, 0.0);
-      //comm_can_set_rpm(VESC_FD, 0.0);
-      //comm_can_set_rpm(VESC_BD, -VESC_DRUM_SPEED);
-      break;
-  }
-  }
-}
-
-void can_transmit_eid(uint32_t id, const uint8_t *data, uint8_t len) {
-  FDCAN_TxHeaderTypeDef TxHeader;
-
-  TxHeader.IdType = FDCAN_EXTENDED_ID;
-  TxHeader.TxFrameType = FDCAN_DATA_FRAME;
-  TxHeader.DataLength = len;
-  TxHeader.ErrorStateIndicator = FDCAN_ESI_PASSIVE;
-  TxHeader.BitRateSwitch = FDCAN_BRS_OFF;
-  TxHeader.FDFormat = FDCAN_CLASSIC_CAN;
-  TxHeader.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
-  TxHeader.MessageMarker = 0;
-
-  TxHeader.Identifier = id;
-
-  HAL_FDCAN_AddMessageToTxFifoQ(vescCanHandle, &TxHeader, data);
-}
-
-void buffer_append_int16(uint8_t* buffer, int16_t number, int32_t *index) {
-  buffer[(*index)++] = number >> 8;
-  buffer[(*index)++] = number;
-}
-
-void buffer_append_int32(uint8_t* buffer, int32_t number, int32_t *index) {
-  buffer[(*index)++] = number >> 24;
-  buffer[(*index)++] = number >> 16;
-  buffer[(*index)++] = number >> 8;
-  buffer[(*index)++] = number;
-}
-
-void buffer_append_float16(uint8_t* buffer, float number, float scale, int32_t *index) {
+static void buffer_append_float16(uint8_t *buffer, float number, float scale, int32_t *index)
+{
     buffer_append_int16(buffer, (int16_t)(number * scale), index);
 }
 
-void buffer_append_float32(uint8_t* buffer, float number, float scale, int32_t *index) {
+static void buffer_append_float32(uint8_t *buffer, float number, float scale, int32_t *index)
+{
     buffer_append_int32(buffer, (int32_t)(number * scale), index);
 }
 
-void comm_can_set_duty(uint8_t controller_id, float duty) {
-  int32_t send_index = 0;
-  uint8_t buffer[4];
-  buffer_append_int32(buffer, (int32_t)(duty * 100000.0), &send_index);
-  can_transmit_eid(controller_id |
-      ((uint32_t)CAN_PACKET_SET_DUTY << 8), buffer, send_index);
+/* --------------------------------------------------------------------------
+ * Hardware register configuration
+ * Does NOT start the peripheral - that is handled by CAN_HardwareInit()
+ * in can_queue.c after this function returns.
+ *
+ * Typical call sequence in main.c:
+ *   ALT_MX_FDCAN1_Init(&hfdcan1);
+ *   CAN_HardwareInit(&hfdcan1, FDCAN1_IT0_IRQn, 5);
+ *   CanQueue_Init();
+ *   VescInit(&hfdcan1);
+ * -------------------------------------------------------------------------- */
+void ALT_MX_FDCAN1_Init(FDCAN_HandleTypeDef *hfdcan1)
+{
+    hfdcan1->Instance                  = FDCAN1;
+    hfdcan1->Init.ClockDivider         = FDCAN_CLOCK_DIV1;
+    hfdcan1->Init.FrameFormat          = FDCAN_FRAME_CLASSIC;
+    hfdcan1->Init.Mode                 = FDCAN_MODE_NORMAL;
+    hfdcan1->Init.AutoRetransmission   = ENABLE;
+    hfdcan1->Init.TransmitPause        = DISABLE;
+    hfdcan1->Init.ProtocolException    = DISABLE;
+    hfdcan1->Init.NominalPrescaler     = 1;
+    hfdcan1->Init.NominalSyncJumpWidth = 2;
+    hfdcan1->Init.NominalTimeSeg1      = 13;
+    hfdcan1->Init.NominalTimeSeg2      = 2;
+    hfdcan1->Init.DataPrescaler        = 1;
+    hfdcan1->Init.DataSyncJumpWidth    = 1;
+    hfdcan1->Init.DataTimeSeg1         = 1;
+    hfdcan1->Init.DataTimeSeg2         = 1;
+    hfdcan1->Init.StdFiltersNbr        = 1;
+    hfdcan1->Init.ExtFiltersNbr        = 1;
+    hfdcan1->Init.TxFifoQueueMode      = FDCAN_TX_FIFO_OPERATION;
+
+    if(HAL_FDCAN_Init(hfdcan1) != HAL_OK)
+    {
+        Error_Handler();
+    }
 }
 
-void comm_can_set_current(uint8_t controller_id, float current) {
-  int32_t send_index = 0;
-  uint8_t buffer[4];
-  buffer_append_int32(buffer, (int32_t)(current * 1000.0), &send_index);
-  can_transmit_eid(controller_id |
-      ((uint32_t)CAN_PACKET_SET_CURRENT << 8), buffer, send_index);
+/* --------------------------------------------------------------------------
+ * VESC specific initialisation
+ * Stores the handle and configures RX filters.
+ * Returns 0 on success, 1 on any HAL error.
+ * -------------------------------------------------------------------------- */
+int VescInit(FDCAN_HandleTypeDef *hfdcan)
+{
+    SetScheduledTime(&canbus_schedule, VESC_POLL_RATE);
+
+    FDCAN_FilterTypeDef sFilterConfig;
+
+    vescCanHandle = hfdcan;
+
+    sFilterConfig.IdType       = FDCAN_EXTENDED_ID;
+    sFilterConfig.FilterIndex  = 0;
+    sFilterConfig.FilterType   = FDCAN_FILTER_MASK;
+    sFilterConfig.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
+    sFilterConfig.FilterID1    = 0; // Accept everything - ID checked in receive handler
+    sFilterConfig.FilterID2    = 0;
+
+    if(HAL_FDCAN_ConfigFilter(vescCanHandle, &sFilterConfig) != HAL_OK) return 1;
+
+    /* Reject anything that does not match a filter */
+    if(HAL_FDCAN_ConfigGlobalFilter(vescCanHandle,
+            FDCAN_REJECT, FDCAN_REJECT,
+            FDCAN_FILTER_REMOTE, FDCAN_FILTER_REMOTE) != HAL_OK) return 1;
+
+    return 0;
 }
 
-void comm_can_set_current_off_delay(uint8_t controller_id, float current, float off_delay) {
-  int32_t send_index = 0;
-  uint8_t buffer[6];
-  buffer_append_int32(buffer, (int32_t)(current * 1000.0), &send_index);
-  buffer_append_float16(buffer, off_delay, 1e3, &send_index);
-  can_transmit_eid(controller_id |
-      ((uint32_t)CAN_PACKET_SET_CURRENT << 8), buffer, send_index);
+/* --------------------------------------------------------------------------
+ * Polling loop entry point
+ * -------------------------------------------------------------------------- */
+void VescPoll(void)
+{
+    if(!ScheduleReady(canbus_schedule)) return;
+
+    ResetSchedule(&canbus_schedule);
+
+    switch(CurrentRoverState())
+    {
+        case ROVER_IDLE:
+        case ROVER_READY:
+            comm_can_set_rpm(VESC_FR, 0.0f);
+            comm_can_set_rpm(VESC_FL, 0.0f);
+            comm_can_set_rpm(VESC_BR, 0.0f);
+            comm_can_set_rpm(VESC_BL, 0.0f);
+            break;
+
+        case ROVER_FORWARD:
+            comm_can_set_rpm(VESC_FR,  VESC_WHEEL_SPEED);
+            comm_can_set_rpm(VESC_FL,  VESC_WHEEL_SPEED);
+            comm_can_set_rpm(VESC_BR,  VESC_WHEEL_SPEED);
+            comm_can_set_rpm(VESC_BL,  VESC_WHEEL_SPEED);
+            break;
+
+        case ROVER_BACKWARD:
+            comm_can_set_rpm(VESC_FR, -VESC_WHEEL_SPEED);
+            comm_can_set_rpm(VESC_FL, -VESC_WHEEL_SPEED);
+            comm_can_set_rpm(VESC_BR, -VESC_WHEEL_SPEED);
+            comm_can_set_rpm(VESC_BL, -VESC_WHEEL_SPEED);
+            break;
+
+        case ROVER_DIG_FORWARD:
+        case ROVER_DIG_BACKWARD:
+            comm_can_set_rpm(VESC_FR, 0.0f);
+            comm_can_set_rpm(VESC_FL, 0.0f);
+            comm_can_set_rpm(VESC_BR, 0.0f);
+            comm_can_set_rpm(VESC_BL, 0.0f);
+            //comm_can_set_rpm(VESC_FD,  VESC_DRUM_SPEED);
+            //comm_can_set_rpm(VESC_BD,  VESC_DRUM_SPEED);
+            break;
+
+        case ROVER_DEPOSIT_FORWARD:
+            comm_can_set_rpm(VESC_FR, 0.0f);
+            comm_can_set_rpm(VESC_FL, 0.0f);
+            comm_can_set_rpm(VESC_BR, 0.0f);
+            comm_can_set_rpm(VESC_BL, 0.0f);
+            //comm_can_set_rpm(VESC_FD, -VESC_DRUM_SPEED);
+            //comm_can_set_rpm(VESC_BD,  0.0f);
+            break;
+
+        case ROVER_DEPOSIT_BACKWARD:
+            comm_can_set_rpm(VESC_FR, 0.0f);
+            comm_can_set_rpm(VESC_FL, 0.0f);
+            comm_can_set_rpm(VESC_BR, 0.0f);
+            comm_can_set_rpm(VESC_BL, 0.0f);
+            //comm_can_set_rpm(VESC_FD,  0.0f);
+            //comm_can_set_rpm(VESC_BD, -VESC_DRUM_SPEED);
+            break;
+
+        default:
+            break;
+    }
 }
 
-void comm_can_set_current_brake(uint8_t controller_id, float current) {
-  int32_t send_index = 0;
-  uint8_t buffer[4];
-  buffer_append_int32(buffer, (int32_t)(current * 1000.0), &send_index);
-  can_transmit_eid(controller_id |
-      ((uint32_t)CAN_PACKET_SET_CURRENT_BRAKE << 8), buffer, send_index);
+/* --------------------------------------------------------------------------
+ * VESC CAN command implementations
+ * All route through can_transmit_eid() -> CanQueue_Enqueue() -> CAN_TransmitRaw()
+ * -------------------------------------------------------------------------- */
+void comm_can_set_duty(uint8_t controller_id, float duty)
+{
+    int32_t send_index = 0;
+    uint8_t buffer[4];
+    buffer_append_int32(buffer, (int32_t)(duty * 100000.0f), &send_index);
+    can_transmit_eid(vescCanHandle, controller_id | ((uint32_t)CAN_PACKET_SET_DUTY << 8), buffer, send_index);
 }
 
-void comm_can_set_rpm(uint8_t controller_id, float rpm) {
-  int32_t send_index = 0;
-  uint8_t buffer[4];
-  buffer_append_int32(buffer, (int32_t)rpm, &send_index);
-  can_transmit_eid(controller_id |
-      ((uint32_t)CAN_PACKET_SET_RPM << 8), buffer, send_index);
+void comm_can_set_current(uint8_t controller_id, float current)
+{
+    int32_t send_index = 0;
+    uint8_t buffer[4];
+    buffer_append_int32(buffer, (int32_t)(current * 1000.0f), &send_index);
+    can_transmit_eid(vescCanHandle, controller_id | ((uint32_t)CAN_PACKET_SET_CURRENT << 8), buffer, send_index);
 }
 
-void comm_can_set_pos(uint8_t controller_id, float pos) {
-  int32_t send_index = 0;
-  uint8_t buffer[4];
-  buffer_append_int32(buffer, (int32_t)(pos * 1000000.0), &send_index);
-  can_transmit_eid(controller_id |
-      ((uint32_t)CAN_PACKET_SET_POS << 8), buffer, send_index);
+void comm_can_set_current_off_delay(uint8_t controller_id, float current, float off_delay)
+{
+    int32_t send_index = 0;
+    uint8_t buffer[6];
+    buffer_append_int32(buffer, (int32_t)(current * 1000.0f), &send_index);
+    buffer_append_float16(buffer, off_delay, 1e3f, &send_index);
+    can_transmit_eid(vescCanHandle, controller_id | ((uint32_t)CAN_PACKET_SET_CURRENT << 8), buffer, send_index);
 }
 
-void comm_can_set_current_rel(uint8_t controller_id, float current_rel) {
-  int32_t send_index = 0;
-  uint8_t buffer[4];
-  buffer_append_float32(buffer, current_rel, 1e5, &send_index);
-  can_transmit_eid(controller_id |
-      ((uint32_t)CAN_PACKET_SET_CURRENT_REL << 8), buffer, send_index);
+void comm_can_set_current_brake(uint8_t controller_id, float current)
+{
+    int32_t send_index = 0;
+    uint8_t buffer[4];
+    buffer_append_int32(buffer, (int32_t)(current * 1000.0f), &send_index);
+    can_transmit_eid(vescCanHandle, controller_id | ((uint32_t)CAN_PACKET_SET_CURRENT_BRAKE << 8), buffer, send_index);
 }
 
-/**
- * Same as above, but also sets the off delay. Note that this command uses 6 bytes now. The off delay is useful to set to keep the current controller running for a while even after setting currents below the minimum current.
- */
-void comm_can_set_current_rel_off_delay(uint8_t controller_id, float current_rel, float off_delay) {
-  int32_t send_index = 0;
-  uint8_t buffer[6];
-  buffer_append_float32(buffer, current_rel, 1e5, &send_index);
-  buffer_append_float16(buffer, off_delay, 1e3, &send_index);
-  can_transmit_eid(controller_id |
-      ((uint32_t)CAN_PACKET_SET_CURRENT_REL << 8), buffer, send_index);
+void comm_can_set_rpm(uint8_t controller_id, float rpm)
+{
+    int32_t send_index = 0;
+    uint8_t buffer[4];
+    buffer_append_int32(buffer, (int32_t)rpm, &send_index);
+    can_transmit_eid(vescCanHandle, controller_id | ((uint32_t)CAN_PACKET_SET_RPM << 8), buffer, send_index);
 }
 
-void comm_can_set_current_brake_rel(uint8_t controller_id, float current_rel) {
-  int32_t send_index = 0;
-  uint8_t buffer[4];
-  buffer_append_float32(buffer, current_rel, 1e5, &send_index);
-  can_transmit_eid(controller_id |
-      ((uint32_t)CAN_PACKET_SET_CURRENT_BRAKE_REL << 8), buffer, send_index);
+void comm_can_set_pos(uint8_t controller_id, float pos)
+{
+    int32_t send_index = 0;
+    uint8_t buffer[4];
+    buffer_append_int32(buffer, (int32_t)(pos * 1000000.0f), &send_index);
+    can_transmit_eid(vescCanHandle, controller_id | ((uint32_t)CAN_PACKET_SET_POS << 8), buffer, send_index);
 }
 
-void comm_can_set_handbrake(uint8_t controller_id, float current) {
-  int32_t send_index = 0;
-  uint8_t buffer[4];
-  buffer_append_float32(buffer, current, 1e3, &send_index);
-  can_transmit_eid(controller_id |
-      ((uint32_t)CAN_PACKET_SET_CURRENT_HANDBRAKE << 8), buffer, send_index);
+void comm_can_set_current_rel(uint8_t controller_id, float current_rel)
+{
+    int32_t send_index = 0;
+    uint8_t buffer[4];
+    buffer_append_float32(buffer, current_rel, 1e5f, &send_index);
+    can_transmit_eid(vescCanHandle, controller_id | ((uint32_t)CAN_PACKET_SET_CURRENT_REL << 8), buffer, send_index);
 }
 
-void comm_can_set_handbrake_rel(uint8_t controller_id, float current_rel) {
-  int32_t send_index = 0;
-  uint8_t buffer[4];
-  buffer_append_float32(buffer, current_rel, 1e5, &send_index);
-  can_transmit_eid(controller_id |
-      ((uint32_t)CAN_PACKET_SET_CURRENT_HANDBRAKE_REL << 8), buffer, send_index);
+void comm_can_set_current_rel_off_delay(uint8_t controller_id, float current_rel, float off_delay)
+{
+    int32_t send_index = 0;
+    uint8_t buffer[6];
+    buffer_append_float32(buffer, current_rel, 1e5f, &send_index);
+    buffer_append_float16(buffer, off_delay, 1e3f, &send_index);
+    can_transmit_eid(vescCanHandle, controller_id | ((uint32_t)CAN_PACKET_SET_CURRENT_REL << 8), buffer, send_index);
 }
 
+void comm_can_set_current_brake_rel(uint8_t controller_id, float current_rel)
+{
+    int32_t send_index = 0;
+    uint8_t buffer[4];
+    buffer_append_float32(buffer, current_rel, 1e5f, &send_index);
+    can_transmit_eid(vescCanHandle, controller_id | ((uint32_t)CAN_PACKET_SET_CURRENT_BRAKE_REL << 8), buffer, send_index);
+}
+
+void comm_can_set_handbrake(uint8_t controller_id, float current)
+{
+    int32_t send_index = 0;
+    uint8_t buffer[4];
+    buffer_append_float32(buffer, current, 1e3f, &send_index);
+    can_transmit_eid(vescCanHandle, controller_id | ((uint32_t)CAN_PACKET_SET_CURRENT_HANDBRAKE << 8), buffer, send_index);
+}
+
+void comm_can_set_handbrake_rel(uint8_t controller_id, float current_rel)
+{
+    int32_t send_index = 0;
+    uint8_t buffer[4];
+    buffer_append_float32(buffer, current_rel, 1e5f, &send_index);
+    can_transmit_eid(vescCanHandle, controller_id | ((uint32_t)CAN_PACKET_SET_CURRENT_HANDBRAKE_REL << 8), buffer, send_index);
+}
