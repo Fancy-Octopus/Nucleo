@@ -11,6 +11,7 @@
 #include "lwip/debug.h"
 #include "lwip/stats.h"
 #include "rover_controller.h"
+#include "luna_continuous_control.h"
 #include "main.h"
 #include <string.h>
 
@@ -190,6 +191,29 @@ err_t tcp_server_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err
   case ROVER_ESTOP:
     snprintf(msg, sizeof(msg), "Command: Stop");
     return_state = RequestRoverState(ROVER_ESTOP);
+    break;
+  case ROVER_SET_DRIVE_VEL:
+    /* Expect 1 cmd byte + 6 int8 velocity bytes = 7 bytes minimum */
+    if (p->tot_len >= 7) {
+      const int8_t * vels = (const int8_t *)(payload + 1);
+      HandleSetDriveVel(vels);
+      snprintf(msg, sizeof(msg), "Command: Set Drive Vel\n");
+      /* Note: deliberately do NOT call RequestRoverState — see the
+       * comment on ROVER_SET_DRIVE_VEL in rover_controller.h for why. */
+    } else {
+      snprintf(msg, sizeof(msg), "Error: SET_DRIVE_VEL needs 6 bytes\n");
+    }
+    break;
+  case ROVER_SET_STEERING_ANGLES:
+    /* Expect 1 cmd byte + 4 int8 angle bytes = 5 bytes minimum */
+    if (p->tot_len >= 5) {
+      const int8_t * angles = (const int8_t *)(payload + 1);
+      HandleSetSteeringAngles(angles);
+      snprintf(msg, sizeof(msg), "Command: Set Steering Angles\n");
+    } else {
+      snprintf(msg, sizeof(msg), "Error: SET_STEERING_ANGLES needs 4 bytes\n");
+    }
+    break;
   default:
     snprintf(msg, sizeof(msg), "Error: Invalid Command\n");
     break;
