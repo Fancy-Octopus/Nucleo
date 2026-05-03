@@ -17,7 +17,7 @@
 #include "rover_controller.h"
 
 /* (Added by Garrett G) Define for quick changing winch speed (0 to 127) */
-#define WINCH_SPEED   100
+#define WINCH_SPEED   127
 
 //MACROS
 #define ROBOCLAW_ADDRESS 0x80

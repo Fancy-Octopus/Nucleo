@@ -14,15 +14,15 @@
 /* --------------------------------------------------------------------------
  * VESC node IDs
  * -------------------------------------------------------------------------- */
-#define VESC_FR (uint8_t) 5
-#define VESC_FL (uint8_t) 74
-#define VESC_BR (uint8_t) 6
-#define VESC_BL (uint8_t) 1
-#define VESC_FD (uint8_t) 83
-#define VESC_BD (uint8_t) 104
+#define VESC_FL (uint8_t) 10
+#define VESC_FR (uint8_t) 11
+#define VESC_BL (uint8_t) 12
+#define VESC_BR (uint8_t) 13
+#define VESC_FD (uint8_t) 5
+#define VESC_BD (uint8_t) 6
 
 #define VESC_WHEEL_SPEED 5000.0f
-#define VESC_DRUM_SPEED  5000.0f
+#define VESC_DRUM_SPEED  7000.0f
 #define VESC_POLL_TIME   500      //ms
 
 /* --------------------------------------------------------------------------
@@ -161,6 +161,8 @@ void VescPoll(void)
             comm_can_set_rpm(VESC_FL, 0.0f);
             comm_can_set_rpm(VESC_BR, 0.0f);
             comm_can_set_rpm(VESC_BL, 0.0f);
+            comm_can_set_rpm(VESC_FD, 0.0f);
+            comm_can_set_rpm(VESC_BD, 0.0f);
             break;
 
         case ROVER_FORWARD:
@@ -168,6 +170,8 @@ void VescPoll(void)
             comm_can_set_rpm(VESC_FL,  VESC_WHEEL_SPEED);
             comm_can_set_rpm(VESC_BR,  VESC_WHEEL_SPEED);
             comm_can_set_rpm(VESC_BL,  VESC_WHEEL_SPEED);
+            comm_can_set_rpm(VESC_FD, 0.0f);
+            comm_can_set_rpm(VESC_BD, 0.0f);
             break;
 
         case ROVER_BACKWARD:
@@ -175,7 +179,27 @@ void VescPoll(void)
             comm_can_set_rpm(VESC_FL, -VESC_WHEEL_SPEED);
             comm_can_set_rpm(VESC_BR, -VESC_WHEEL_SPEED);
             comm_can_set_rpm(VESC_BL, -VESC_WHEEL_SPEED);
+            comm_can_set_rpm(VESC_FD, 0.0f);
+            comm_can_set_rpm(VESC_BD, 0.0f);
             break;
+
+        case ROVER_TURN_LEFT:
+          comm_can_set_rpm(VESC_FR, VESC_WHEEL_SPEED);
+          comm_can_set_rpm(VESC_BR, VESC_WHEEL_SPEED);
+          comm_can_set_rpm(VESC_FL, -VESC_WHEEL_SPEED);
+          comm_can_set_rpm(VESC_BL, -VESC_WHEEL_SPEED);
+          comm_can_set_rpm(VESC_FD, 0.0f);
+          comm_can_set_rpm(VESC_BD, 0.0f);
+          break;
+
+        case ROVER_TURN_RIGHT:
+          comm_can_set_rpm(VESC_FR, -VESC_WHEEL_SPEED);
+          comm_can_set_rpm(VESC_BR, -VESC_WHEEL_SPEED);
+          comm_can_set_rpm(VESC_FL, VESC_WHEEL_SPEED);
+          comm_can_set_rpm(VESC_BL, VESC_WHEEL_SPEED);
+          comm_can_set_rpm(VESC_FD, 0.0f);
+          comm_can_set_rpm(VESC_BD, 0.0f);
+          break;
 
         case ROVER_DIG_FORWARD:
         case ROVER_DIG_BACKWARD:
@@ -183,8 +207,8 @@ void VescPoll(void)
             comm_can_set_rpm(VESC_FL, 0.0f);
             comm_can_set_rpm(VESC_BR, 0.0f);
             comm_can_set_rpm(VESC_BL, 0.0f);
-            //comm_can_set_rpm(VESC_FD,  VESC_DRUM_SPEED);
-            //comm_can_set_rpm(VESC_BD,  VESC_DRUM_SPEED);
+            comm_can_set_rpm(VESC_FD, VESC_DRUM_SPEED);
+            comm_can_set_rpm(VESC_BD, VESC_DRUM_SPEED);
             break;
 
         case ROVER_DEPOSIT_FORWARD:
@@ -192,8 +216,8 @@ void VescPoll(void)
             comm_can_set_rpm(VESC_FL, 0.0f);
             comm_can_set_rpm(VESC_BR, 0.0f);
             comm_can_set_rpm(VESC_BL, 0.0f);
-            //comm_can_set_rpm(VESC_FD, -VESC_DRUM_SPEED);
-            //comm_can_set_rpm(VESC_BD,  0.0f);
+            comm_can_set_rpm(VESC_FD, -VESC_DRUM_SPEED);
+            comm_can_set_rpm(VESC_BD,  0.0f);
             break;
 
         case ROVER_DEPOSIT_BACKWARD:
@@ -201,12 +225,18 @@ void VescPoll(void)
             comm_can_set_rpm(VESC_FL, 0.0f);
             comm_can_set_rpm(VESC_BR, 0.0f);
             comm_can_set_rpm(VESC_BL, 0.0f);
-            //comm_can_set_rpm(VESC_FD,  0.0f);
-            //comm_can_set_rpm(VESC_BD, -VESC_DRUM_SPEED);
+            comm_can_set_rpm(VESC_FD, 0.0f);
+            comm_can_set_rpm(VESC_BD, -VESC_DRUM_SPEED);
             break;
 
         default:
-            break;
+          comm_can_set_rpm(VESC_FR, 0.0f);
+          comm_can_set_rpm(VESC_FL, 0.0f);
+          comm_can_set_rpm(VESC_BR, 0.0f);
+          comm_can_set_rpm(VESC_BL, 0.0f);
+          comm_can_set_rpm(VESC_FD, 0.0f);
+          comm_can_set_rpm(VESC_BD, 0.0f);
+          break;
     }
 }
 
