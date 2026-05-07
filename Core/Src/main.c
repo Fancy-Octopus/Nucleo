@@ -113,7 +113,7 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_ICACHE_Init();
-  //HAL_Delay(1000); //Don't question this, and DO NOT REMOVE (PLL startup messes with ethernet)
+  HAL_Delay(1000); //Don't question this, and DO NOT REMOVE (Ethernet needs time to power on)
   MX_ETH_Init();
   //MX_FDCAN1_Init();
   ALT_MX_FDCAN1_Init(&hfdcan1);  // Rewrote MX-init function, is now inside vesc_can.c
@@ -174,7 +174,7 @@ int main(void)
     if(ScheduleReady(toggleLEDs)){
     	SetScheduledTime(&toggleLEDs,500);
     	//BSP_LED_Toggle(LED_RED); //uncomment this for power/program testing
-	}
+    }
   }
 }
 
