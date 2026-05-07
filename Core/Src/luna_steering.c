@@ -58,6 +58,25 @@ static void SendAngles(float fl, float fr, float rl, float rr)
     HAL_UART_Transmit(&steeringUart, pkt, STEERING_CMD_LEN, 10);
 }
 
+static void SendHomeCommand(void)
+{
+    uint8_t pkt[STEERING_HOME_LEN];
+    pkt[0] = STEERING_START_BYTE;
+    pkt[1] = STEERING_HOME_TYPE;
+    pkt[2] = Crc8(pkt, 2);
+    HAL_UART_Transmit(&steeringUart, pkt, STEERING_HOME_LEN, 10);
+}
+
+static void SendResetCommand(uint8_t idx)
+{
+    uint8_t pkt[STEERING_RESET_LEN];
+    pkt[0] = STEERING_START_BYTE;
+    pkt[1] = STEERING_RESET_TYPE;
+    pkt[2] = idx;
+    pkt[3] = Crc8(pkt, 3);
+    HAL_UART_Transmit(&steeringUart, pkt, STEERING_RESET_LEN, 10);
+}
+
 static void ProcessStatusPacket(const uint8_t *buf)
 {
     /* buf[0]=0xAA, buf[1]=0x02, buf[2..17]=floats, buf[18]=flags, buf[19]=crc */
@@ -177,6 +196,16 @@ void SteeringPoll(void)
 void SetSteeringAngles(float fl, float fr, float rl, float rr)
 {
     SendAngles(fl, fr, rl, rr);
+}
+
+void SteeringHome(void)
+{
+    SendHomeCommand();
+}
+
+void SteeringResetDriver(uint8_t idx)
+{
+    SendResetCommand(idx);
 }
 
 steering_status_t GetSteeringStatus(void)
