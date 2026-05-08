@@ -21,6 +21,7 @@ typedef enum {
 /* ---- Private globals ---- */
 static UART_HandleTypeDef steeringUart;
 static steering_status_t  lastStatus;
+static steering_diag_t    diag;
 static rover_state_t      lastRoverState = ROVER_IDLE;
 
 /* RX state machine */
@@ -56,6 +57,17 @@ static void SendAngles(float fl, float fr, float rl, float rr)
     memcpy(&pkt[14], &rr, 4);
     pkt[18] = Crc8(pkt, 18);
     HAL_UART_Transmit(&steeringUart, pkt, STEERING_CMD_LEN, 10);
+    diag.tx_sent++;
+}
+
+static void SendQuery(void)
+{
+    uint8_t pkt[STEERING_QUERY_LEN];
+    pkt[0] = STEERING_START_BYTE;
+    pkt[1] = STEERING_QUERY_TYPE;
+    pkt[2] = Crc8(pkt, 2);
+    HAL_UART_Transmit(&steeringUart, pkt, STEERING_QUERY_LEN, 10);
+    diag.tx_sent++;
 }
 
 static void SendHomeCommand(void)
@@ -80,21 +92,28 @@ static void SendResetCommand(uint8_t idx)
 static void ProcessStatusPacket(const uint8_t *buf)
 {
     /* buf[0]=0xAA, buf[1]=0x02, buf[2..17]=floats, buf[18]=flags, buf[19]=crc */
-    if (Crc8(buf, STEERING_STATUS_LEN - 1) != buf[STEERING_STATUS_LEN - 1])
+    if (Crc8(buf, STEERING_STATUS_LEN - 1) != buf[STEERING_STATUS_LEN - 1]) {
+        diag.rx_bad_crc++;
         return;
+    }
 
     memcpy(&lastStatus.fl, &buf[2],  4);
     memcpy(&lastStatus.fr, &buf[6],  4);
     memcpy(&lastStatus.rl, &buf[10], 4);
     memcpy(&lastStatus.rr, &buf[14], 4);
-    lastStatus.flags = buf[18];
-    lastStatus.valid = 1;
+    lastStatus.flags    = buf[18];
+    lastStatus.valid    = 1;
+    diag.rx_good++;
+    diag.ever_connected = 1;
 }
 
 static void DrainRx(void)
 {
     uint8_t b;
-    while (HAL_UART_Receive(&steeringUart, &b, 1, 0) == HAL_OK) {
+    HAL_StatusTypeDef ret;
+
+    while ((ret = HAL_UART_Receive(&steeringUart, &b, 1, 0)) == HAL_OK) {
+        diag.rx_bytes++;
         switch (rxState) {
         case RX_WAIT_START:
             if (b == STEERING_START_BYTE) {
@@ -126,6 +145,17 @@ static void DrainRx(void)
             rxState = RX_WAIT_START;
             break;
         }
+    }
+
+    /* Accumulate UART hardware errors (framing, overrun, noise).
+     * HAL sets ErrorCode when any of these fire; clear it so we don't double-count. */
+    if (steeringUart.ErrorCode != HAL_UART_ERROR_NONE) {
+        diag.uart_errors++;
+        steeringUart.ErrorCode = HAL_UART_ERROR_NONE;
+        /* Re-arm the peripheral — overrun/framing errors can stall the receiver */
+        __HAL_UART_CLEAR_OREFLAG(&steeringUart);
+        __HAL_UART_CLEAR_FEFLAG(&steeringUart);
+        __HAL_UART_CLEAR_NEFLAG(&steeringUart);
     }
 }
 
@@ -198,6 +228,11 @@ void SetSteeringAngles(float fl, float fr, float rl, float rr)
     SendAngles(fl, fr, rl, rr);
 }
 
+void SteeringRequestStatus(void)
+{
+    SendQuery();
+}
+
 void SteeringHome(void)
 {
     SendHomeCommand();
@@ -213,4 +248,9 @@ steering_status_t GetSteeringStatus(void)
     steering_status_t s = lastStatus;
     lastStatus.valid = 0;
     return s;
+}
+
+steering_diag_t GetSteeringDiag(void)
+{
+    return diag;
 }
