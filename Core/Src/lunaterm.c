@@ -265,9 +265,11 @@ void PrintStepperStats(EmbeddedCli *cli, char *args, void *context){
     steering_diag_t   d = GetSteeringDiag();
 
     /* ---- Link health ---- */
+    printf("Init:     %s\r\n", d.init_ok ? "OK" : "FAILED (HAL_UART_Init error)");
     printf("Link:     %s\r\n", d.ever_connected ? "OK (reply received)" : "NO REPLY from L4");
-    printf("TX sent:  %lu  RX bytes: %lu  RX good: %lu  Bad CRC: %lu  UART err: %lu\r\n",
+    printf("TX ok: %lu  TX err: %lu  RX bytes: %lu  RX good: %lu  Bad CRC: %lu  UART err: %lu\r\n",
            (unsigned long)d.tx_sent,
+           (unsigned long)d.tx_errors,
            (unsigned long)d.rx_bytes,
            (unsigned long)d.rx_good,
            (unsigned long)d.rx_bad_crc,

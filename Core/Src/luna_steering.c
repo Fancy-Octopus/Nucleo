@@ -47,6 +47,14 @@ static uint8_t Crc8(const uint8_t *data, uint8_t len)
     return crc;
 }
 
+static void SendPacket(const uint8_t *pkt, uint8_t len)
+{
+    if (HAL_UART_Transmit(&steeringUart, (uint8_t *)pkt, len, 10) == HAL_OK)
+        diag.tx_sent++;
+    else
+        diag.tx_errors++;
+}
+
 static void SendAngles(float fl, float fr, float rl, float rr)
 {
     uint8_t pkt[STEERING_CMD_LEN];
@@ -57,8 +65,7 @@ static void SendAngles(float fl, float fr, float rl, float rr)
     memcpy(&pkt[10], &rl, 4);
     memcpy(&pkt[14], &rr, 4);
     pkt[18] = Crc8(pkt, 18);
-    HAL_UART_Transmit(&steeringUart, pkt, STEERING_CMD_LEN, 10);
-    diag.tx_sent++;
+    SendPacket(pkt, STEERING_CMD_LEN);
 }
 
 static void SendQuery(void)
@@ -67,8 +74,7 @@ static void SendQuery(void)
     pkt[0] = STEERING_START_BYTE;
     pkt[1] = STEERING_QUERY_TYPE;
     pkt[2] = Crc8(pkt, 2);
-    HAL_UART_Transmit(&steeringUart, pkt, STEERING_QUERY_LEN, 10);
-    diag.tx_sent++;
+    SendPacket(pkt, STEERING_QUERY_LEN);
 }
 
 static void SendHomeCommand(void)
@@ -77,7 +83,7 @@ static void SendHomeCommand(void)
     pkt[0] = STEERING_START_BYTE;
     pkt[1] = STEERING_HOME_TYPE;
     pkt[2] = Crc8(pkt, 2);
-    HAL_UART_Transmit(&steeringUart, pkt, STEERING_HOME_LEN, 10);
+    SendPacket(pkt, STEERING_HOME_LEN);
 }
 
 static void SendResetCommand(uint8_t idx)
@@ -87,7 +93,7 @@ static void SendResetCommand(uint8_t idx)
     pkt[1] = STEERING_RESET_TYPE;
     pkt[2] = idx;
     pkt[3] = Crc8(pkt, 3);
-    HAL_UART_Transmit(&steeringUart, pkt, STEERING_RESET_LEN, 10);
+    SendPacket(pkt, STEERING_RESET_LEN);
 }
 
 static void ProcessStatusPacket(const uint8_t *buf)
@@ -192,7 +198,7 @@ void SteeringInit(void)
     steeringUart.Init.HwFlowCtl      = UART_HWCONTROL_NONE;
     steeringUart.Init.OverSampling   = UART_OVERSAMPLING_8;
     steeringUart.Init.ClockPrescaler = UART_PRESCALER_DIV1;
-    HAL_UART_Init(&steeringUart);
+    diag.init_ok = (HAL_UART_Init(&steeringUart) == HAL_OK) ? 1 : 0;
 
     /* Send initial straight-angle command */
     SendAngles(STEERING_ANGLE_STRAIGHT, STEERING_ANGLE_STRAIGHT,

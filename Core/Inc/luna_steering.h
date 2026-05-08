@@ -50,11 +50,13 @@ typedef struct {
 
 /* ---- Diagnostic counters ---- */
 typedef struct {
-    uint32_t tx_sent;        /* total packets transmitted to L4 */
+    uint32_t tx_sent;        /* packets where HAL_UART_Transmit returned HAL_OK */
+    uint32_t tx_errors;      /* packets where HAL_UART_Transmit returned an error */
     uint32_t rx_bytes;       /* total raw bytes received from L4 */
     uint32_t rx_good;        /* status packets with valid CRC accepted */
     uint32_t rx_bad_crc;     /* status packets with bad CRC (framing looked valid) */
     uint32_t uart_errors;    /* UART-level framing / overrun / noise errors */
+    uint8_t  init_ok;        /* 1 if HAL_UART_Init succeeded during SteeringInit */
     uint8_t  ever_connected; /* 1 if at least one valid status packet has been received */
 } steering_diag_t;
 
