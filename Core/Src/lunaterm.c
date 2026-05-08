@@ -258,7 +258,31 @@ void PrintOdriveStats(EmbeddedCli *cli, char *args, void *context){
 }
 
 void PrintStepperStats(EmbeddedCli *cli, char *args, void *context){
-  steering_status_t s;
-  s = GetSteeringStatus();
-  printf("Stepper Angles:  FL: %.2f, FR: %.2f, BL: %0.2f, BR: %0.2f\r\n", s.fl, s.fr, s.rl, s.rr);
+    /* Request fresh angles, wait up to 50 ms for the L4 to reply, then drain. */
+    SteeringRequestStatus();
+    HAL_Delay(50);
+    SteeringPoll();
+
+    steering_status_t s = GetSteeringStatus();
+    steering_diag_t   d = GetSteeringDiag();
+
+    /* ---- Link health ---- */
+    printf("Link:     %s\r\n", d.ever_connected ? "OK (reply received)" : "NO REPLY from L4");
+    printf("TX sent:  %lu  RX bytes: %lu  RX good: %lu  Bad CRC: %lu  UART err: %lu\r\n",
+           (unsigned long)d.tx_sent,
+           (unsigned long)d.rx_bytes,
+           (unsigned long)d.rx_good,
+           (unsigned long)d.rx_bad_crc,
+           (unsigned long)d.uart_errors);
+
+    /* ---- Angles ---- */
+    if (d.ever_connected) {
+        printf("Angles:   FL=%+6.2f  FR=%+6.2f  BL=%+6.2f  BR=%+6.2f  (deg)\r\n",
+               (double)s.fl, (double)s.fr, (double)s.rl, (double)s.rr);
+        printf("Flags:    %s%s\r\n",
+               (s.flags & STEERING_FLAG_HOMING) ? "HOMING " : "",
+               (s.flags & STEERING_FLAG_HOMED)  ? "HOMED"   : "not-homed");
+    } else {
+        printf("Angles:   (no data - send a command or check wiring/baud)\r\n");
+    }
 }
