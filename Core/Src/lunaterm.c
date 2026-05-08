@@ -258,10 +258,15 @@ void PrintOdriveStats(EmbeddedCli *cli, char *args, void *context){
 }
 
 void PrintStepperStats(EmbeddedCli *cli, char *args, void *context){
-    /* Request fresh angles, wait up to 50 ms for the L4 to reply, then drain. */
+    /* Request fresh angles. Spin calling SteeringPoll() until a reply arrives or
+     * 30 ms elapse. At 460800 baud the round-trip is <1 ms, so we exit almost
+     * immediately on a healthy link and only burn the full 30 ms if the L4 is
+     * absent. This keeps the stall time short without a fixed HAL_Delay. */
+    uint32_t rx_before = GetSteeringDiag().rx_good;
     SteeringRequestStatus();
-    HAL_Delay(50);
-    SteeringPoll();
+    uint32_t deadline = HAL_GetTick() + 30;
+    while (HAL_GetTick() < deadline && GetSteeringDiag().rx_good == rx_before)
+        SteeringPoll();
 
     steering_status_t s = GetSteeringStatus();
     steering_diag_t   d = GetSteeringDiag();
