@@ -8,10 +8,13 @@
 #define EMBEDDED_CLI_IMPL
 #include "embedded_cli.h"
 #include "main.h"
+#include <stdio.h>
+#include <string.h>
 
 //PLACE INCLUDE OF OTHER MODULES NEEDED FOR CLI HERE//
 #include "rover_controller.h"
 #include "odrive_can.h"
+#include "luna_steering.h"
 
 //////////////////////////////////////////////////////
 
@@ -27,6 +30,7 @@ void SetWinchDown(EmbeddedCli *cli, char *args, void *context);
 void SetDigState(EmbeddedCli *cli, char *args, void *context);
 void AvgLoopTime(EmbeddedCli *cli, char *args, void *context);
 void PrintOdriveStats(EmbeddedCli *cli, char *args, void *context);
+void PrintStepperStats(EmbeddedCli *cli, char *args, void *context);
 
 EmbeddedCli *cli;
 
@@ -118,6 +122,14 @@ CliCommandBinding OdriveStats = {
 	PrintOdriveStats               // binding function
 };
 
+CliCommandBinding StepperStats = {
+    "stats-steps",
+    "Print Stepper Stats",
+    0,
+    NULL,
+    PrintStepperStats
+};
+
 
 void LunaTermInit(void){
 	EmbeddedCliConfig cliConfig = *embeddedCliDefaultConfig();
@@ -136,6 +148,7 @@ void LunaTermInit(void){
 	embeddedCliAddBinding(cli,SetDig);
 	embeddedCliAddBinding(cli,SetRovIdle);
 	embeddedCliAddBinding(cli,OdriveStats);
+	embeddedCliAddBinding(cli,StepperStats);
 
 	printf("\r\n");
 }
@@ -242,4 +255,10 @@ void AvgLoopTime(EmbeddedCli *cli, char *args, void *context){
 
 void PrintOdriveStats(EmbeddedCli *cli, char *args, void *context){
 	PrintODriveConnStatus();
+}
+
+void PrintStepperStats(EmbeddedCli *cli, char *args, void *context){
+  steering_status_t s;
+  s = GetSteeringStatus();
+  printf("Stepper Angles:  FL: %.2f, FR: %.2f, BL: %0.2f, BR: %0.2f\r\n", s.fl, s.fr, s.rl, s.rr);
 }
