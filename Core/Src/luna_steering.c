@@ -23,6 +23,7 @@ static UART_HandleTypeDef steeringUart;
 static steering_status_t  lastStatus;
 static steering_diag_t    diag;
 static rover_state_t      lastRoverState = ROVER_IDLE;
+static uint32_t           lastRefreshTick = 0;
 
 /* RX state machine */
 static rx_state_t  rxState      = RX_WAIT_START;
@@ -201,6 +202,14 @@ void SteeringInit(void)
 void SteeringPoll(void)
 {
     DrainRx();
+
+    /* Periodic status refresh — keeps cached data fresh for any consumer
+     * (CLI, TCP, telemetry) without requiring an explicit request. */
+    uint32_t now = HAL_GetTick();
+    if (now - lastRefreshTick >= STEERING_REFRESH_MS) {
+        lastRefreshTick = now;
+        SendQuery();
+    }
 
     rover_state_t state = CurrentRoverState();
     if (state == lastRoverState)

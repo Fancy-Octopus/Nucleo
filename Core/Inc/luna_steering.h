@@ -24,6 +24,11 @@
 #define STEERING_QUERY_TYPE       0x05U
 #define STEERING_QUERY_LEN        3U    /* [start][type][crc] — requests status without changing angles */
 
+/* How often SteeringPoll() proactively refreshes the cached status (ms).
+ * Any consumer (CLI, TCP, telemetry) can call GetSteeringStatus() and always
+ * get data no older than this without issuing its own request. */
+#define STEERING_REFRESH_MS       200U
+
 /* ---- Status flags (from L4 flags byte) ---- */
 #define STEERING_FLAG_HOMING      0x01U  /* homing sequence active */
 #define STEERING_FLAG_HOMED       0x02U  /* successfully homed at least once */
