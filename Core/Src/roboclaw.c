@@ -21,6 +21,7 @@
 #include "string.h"
 #include "rover_controller.h"
 #include "lunautils.h"
+#include "luna_wait.h"
 
 /* Default arm speed for Tier 1 ARMS_UP / ARMS_DOWN (0-127) */
 #define ARM_SPEED        127
