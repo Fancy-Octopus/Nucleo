@@ -266,7 +266,14 @@ void PrintStepperStats(EmbeddedCli *cli, char *args, void *context){
 
     /* ---- Link health ---- */
     printf("Init:     %s\r\n", d.init_ok ? "OK" : "FAILED (HAL_UART_Init error)");
-    printf("Link:     %s\r\n", d.ever_connected ? "OK (reply received)" : "NO REPLY from L4");
+    if (!d.ever_connected) {
+        printf("Link:     NO REPLY from L4\r\n");
+    } else if (d.link_active) {
+        printf("Link:     OK (active)\r\n");
+    } else {
+        printf("Link:     LOST (timeout, %lu disconnect(s))\r\n",
+               (unsigned long)d.link_lost_count);
+    }
     printf("TX ok: %lu  TX err: %lu  RX bytes: %lu  RX good: %lu  Bad CRC: %lu  UART err: %lu\r\n",
            (unsigned long)d.tx_sent,
            (unsigned long)d.tx_errors,
@@ -276,13 +283,14 @@ void PrintStepperStats(EmbeddedCli *cli, char *args, void *context){
            (unsigned long)d.uart_errors);
 
     /* ---- Angles ---- */
-    if (d.ever_connected) {
+    if (d.link_active) {
         printf("Angles:   FL=%+6.2f  FR=%+6.2f  BL=%+6.2f  BR=%+6.2f  (deg)\r\n",
-               (double)s.fl, (double)s.fr, (double)s.rl, (double)s.rr);
+               (double)(s.fl + 0.0f), (double)(s.fr + 0.0f),
+               (double)(s.rl + 0.0f), (double)(s.rr + 0.0f));
         printf("Flags:    %s%s\r\n",
                (s.flags & STEERING_FLAG_HOMING) ? "HOMING " : "",
                (s.flags & STEERING_FLAG_HOMED)  ? "HOMED"   : "not-homed");
     } else {
-        printf("Angles:   (no data - send a command or check wiring/baud)\r\n");
+        printf("Angles:   (no data)\r\n");
     }
 }

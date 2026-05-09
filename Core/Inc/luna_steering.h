@@ -29,6 +29,11 @@
  * get data no older than this without issuing its own request. */
 #define STEERING_REFRESH_MS       200U
 
+/* If no valid status packet is received within this window, the link is
+ * considered lost: cached angles are cleared and link_active goes to 0.
+ * Set to ~5x STEERING_REFRESH_MS to tolerate a few missed replies. */
+#define STEERING_LINK_TIMEOUT_MS  1000U
+
 /* ---- Status flags (from L4 flags byte) ---- */
 #define STEERING_FLAG_HOMING      0x01U  /* homing sequence active */
 #define STEERING_FLAG_HOMED       0x02U  /* successfully homed at least once */
@@ -56,8 +61,11 @@ typedef struct {
     uint32_t rx_good;        /* status packets with valid CRC accepted */
     uint32_t rx_bad_crc;     /* status packets with bad CRC (framing looked valid) */
     uint32_t uart_errors;    /* UART-level framing / overrun / noise errors */
+    uint32_t link_lost_count; /* number of times the link timed out after being active */
+    uint32_t last_rx_tick;   /* HAL_GetTick() value when the last valid packet arrived */
     uint8_t  init_ok;        /* 1 if HAL_UART_Init succeeded during SteeringInit */
     uint8_t  ever_connected; /* 1 if at least one valid status packet has been received */
+    uint8_t  link_active;    /* 1 if a valid packet was received within STEERING_LINK_TIMEOUT_MS */
 } steering_diag_t;
 
 /* ---- Public API ---- */

@@ -25,7 +25,8 @@ static steering_diag_t    diag;
 static rover_state_t      lastRoverState = ROVER_IDLE;
 static uint32_t           lastRefreshTick = 0;
 
-/* RX state machine */
+/* RX interrupt state machine */
+static volatile uint8_t steeringRxByte;
 static rx_state_t  rxState      = RX_WAIT_START;
 static uint8_t     rxBuf[STEERING_STATUS_LEN];
 static uint8_t     rxIdx        = 0;
@@ -112,58 +113,74 @@ static void ProcessStatusPacket(const uint8_t *buf)
     lastStatus.valid    = 1;
     diag.rx_good++;
     diag.ever_connected = 1;
+    diag.link_active    = 1;
+    diag.last_rx_tick   = HAL_GetTick();
 }
 
-static void DrainRx(void)
+/* ---- IRQ handlers ---- */
+
+void UART5_IRQHandler(void)
 {
-    uint8_t b;
-    HAL_StatusTypeDef ret;
+    HAL_UART_IRQHandler(&steeringUart);
+}
 
-    while ((ret = HAL_UART_Receive(&steeringUart, &b, 1, 0)) == HAL_OK) {
-        diag.rx_bytes++;
-        switch (rxState) {
-        case RX_WAIT_START:
-            if (b == STEERING_START_BYTE) {
-                rxBuf[0] = b;
-                rxState  = RX_WAIT_TYPE;
-            }
-            break;
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+    if (huart->Instance != UART5)
+        return;
 
-        case RX_WAIT_TYPE:
-            if (b == STEERING_STATUS_TYPE) {
-                rxBuf[1] = b;
-                rxIdx    = 2;
-                rxState  = RX_PAYLOAD;
-            } else {
-                rxState = RX_WAIT_START;
-            }
-            break;
+    uint8_t b = steeringRxByte;
+    diag.rx_bytes++;
 
-        case RX_PAYLOAD:
-            rxBuf[rxIdx++] = b;
-            /* 18 bytes of payload: indices 2..19 minus the final CRC byte */
-            if (rxIdx == STEERING_STATUS_LEN - 1)
-                rxState = RX_CRC;
-            break;
-
-        case RX_CRC:
-            rxBuf[rxIdx] = b;
-            ProcessStatusPacket(rxBuf);
-            rxState = RX_WAIT_START;
-            break;
+    switch (rxState) {
+    case RX_WAIT_START:
+        if (b == STEERING_START_BYTE) {
+            rxBuf[0] = b;
+            rxState  = RX_WAIT_TYPE;
         }
+        break;
+
+    case RX_WAIT_TYPE:
+        if (b == STEERING_STATUS_TYPE) {
+            rxBuf[1] = b;
+            rxIdx    = 2;
+            rxState  = RX_PAYLOAD;
+        } else {
+            rxState = RX_WAIT_START;
+        }
+        break;
+
+    case RX_PAYLOAD:
+        rxBuf[rxIdx++] = b;
+        if (rxIdx == STEERING_STATUS_LEN - 1)
+            rxState = RX_CRC;
+        break;
+
+    case RX_CRC:
+        rxBuf[rxIdx] = b;
+        ProcessStatusPacket(rxBuf);
+        rxState = RX_WAIT_START;
+        break;
     }
 
-    /* Accumulate UART hardware errors (framing, overrun, noise).
-     * HAL sets ErrorCode when any of these fire; clear it so we don't double-count. */
-    if (steeringUart.ErrorCode != HAL_UART_ERROR_NONE) {
-        diag.uart_errors++;
-        steeringUart.ErrorCode = HAL_UART_ERROR_NONE;
-        /* Re-arm the peripheral — overrun/framing errors can stall the receiver */
-        __HAL_UART_CLEAR_OREFLAG(&steeringUart);
-        __HAL_UART_CLEAR_FEFLAG(&steeringUart);
-        __HAL_UART_CLEAR_NEFLAG(&steeringUart);
-    }
+    /* Re-arm for the next byte */
+    HAL_UART_Receive_IT(&steeringUart, (uint8_t *)&steeringRxByte, 1);
+}
+
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+    if (huart->Instance != UART5)
+        return;
+
+    diag.uart_errors++;
+
+    /* Clear hardware error flags so the peripheral can receive again */
+    __HAL_UART_CLEAR_OREFLAG(huart);
+    __HAL_UART_CLEAR_FEFLAG(huart);
+    __HAL_UART_CLEAR_NEFLAG(huart);
+
+    /* Re-arm */
+    HAL_UART_Receive_IT(&steeringUart, (uint8_t *)&steeringRxByte, 1);
 }
 
 /* ---- Public API ---- */
@@ -200,6 +217,11 @@ void SteeringInit(void)
     steeringUart.Init.ClockPrescaler = UART_PRESCALER_DIV1;
     diag.init_ok = (HAL_UART_Init(&steeringUart) == HAL_OK) ? 1 : 0;
 
+    /* Enable UART5 interrupt and arm RX */
+    HAL_NVIC_SetPriority(UART5_IRQn, 5, 0);
+    HAL_NVIC_EnableIRQ(UART5_IRQn);
+    HAL_UART_Receive_IT(&steeringUart, (uint8_t *)&steeringRxByte, 1);
+
     /* Send initial straight-angle command */
     SendAngles(STEERING_ANGLE_STRAIGHT, STEERING_ANGLE_STRAIGHT,
                STEERING_ANGLE_STRAIGHT, STEERING_ANGLE_STRAIGHT);
@@ -207,11 +229,18 @@ void SteeringInit(void)
 
 void SteeringPoll(void)
 {
-    DrainRx();
+    uint32_t now = HAL_GetTick();
+
+    /* Link-loss detection: clear stale angles if no packet arrived recently */
+    if (diag.link_active &&
+        (now - diag.last_rx_tick >= STEERING_LINK_TIMEOUT_MS)) {
+        diag.link_active = 0;
+        diag.link_lost_count++;
+        memset(&lastStatus, 0, sizeof(lastStatus));
+    }
 
     /* Periodic status refresh — keeps cached data fresh for any consumer
      * (CLI, TCP, telemetry) without requiring an explicit request. */
-    uint32_t now = HAL_GetTick();
     if (now - lastRefreshTick >= STEERING_REFRESH_MS) {
         lastRefreshTick = now;
         SendQuery();
