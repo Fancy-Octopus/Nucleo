@@ -25,6 +25,10 @@ static steering_diag_t    diag;
 static rover_state_t      lastRoverState = ROVER_IDLE;
 static uint32_t           lastRefreshTick = 0;
 
+/* Last angles commanded to the L4 — used by SteeringWheelsReady() */
+static float targetFl = 0.0f, targetFr = 0.0f,
+             targetRl = 0.0f, targetRr = 0.0f;
+
 /* RX interrupt state machine */
 static volatile uint8_t steeringRxByte;
 static rx_state_t  rxState      = RX_WAIT_START;
@@ -56,7 +60,7 @@ static void SendPacket(const uint8_t *pkt, uint8_t len)
         diag.tx_errors++;
 }
 
-static void SendAngles(float fl, float fr, float rl, float rr)
+static void SendAnglesRaw(float fl, float fr, float rl, float rr)
 {
     uint8_t pkt[STEERING_CMD_LEN];
     pkt[0] = STEERING_START_BYTE;
@@ -97,9 +101,28 @@ static void SendResetCommand(uint8_t idx)
     SendPacket(pkt, STEERING_RESET_LEN);
 }
 
+static void SendDisableCommand(uint8_t idx)
+{
+    uint8_t pkt[STEERING_DISABLE_LEN];
+    pkt[0] = STEERING_START_BYTE;
+    pkt[1] = STEERING_DISABLE_TYPE;
+    pkt[2] = idx;
+    pkt[3] = Crc8(pkt, 3);
+    SendPacket(pkt, STEERING_DISABLE_LEN);
+}
+
+static void SendEnableCommand(uint8_t idx)
+{
+    uint8_t pkt[STEERING_ENABLE_LEN];
+    pkt[0] = STEERING_START_BYTE;
+    pkt[1] = STEERING_ENABLE_TYPE;
+    pkt[2] = idx;
+    pkt[3] = Crc8(pkt, 3);
+    SendPacket(pkt, STEERING_ENABLE_LEN);
+}
+
 static void ProcessStatusPacket(const uint8_t *buf)
 {
-    /* buf[0]=0xAA, buf[1]=0x02, buf[2..17]=floats, buf[18]=flags, buf[19]=crc */
     if (Crc8(buf, STEERING_STATUS_LEN - 1) != buf[STEERING_STATUS_LEN - 1]) {
         diag.rx_bad_crc++;
         return;
@@ -115,6 +138,10 @@ static void ProcessStatusPacket(const uint8_t *buf)
     diag.ever_connected = 1;
     diag.link_active    = 1;
     diag.last_rx_tick   = HAL_GetTick();
+
+    /* Update sub-state based on link recovery */
+    if (diag.hstate == STEERING_STATE_LINK_LOST)
+        diag.hstate = STEERING_STATE_IDLE;
 }
 
 /* ---- IRQ handlers ---- */
@@ -134,28 +161,19 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 
     switch (rxState) {
     case RX_WAIT_START:
-        if (b == STEERING_START_BYTE) {
-            rxBuf[0] = b;
-            rxState  = RX_WAIT_TYPE;
-        }
+        if (b == STEERING_START_BYTE) { rxBuf[0] = b; rxState = RX_WAIT_TYPE; }
         break;
-
     case RX_WAIT_TYPE:
         if (b == STEERING_STATUS_TYPE) {
-            rxBuf[1] = b;
-            rxIdx    = 2;
-            rxState  = RX_PAYLOAD;
+            rxBuf[1] = b; rxIdx = 2; rxState = RX_PAYLOAD;
         } else {
             rxState = RX_WAIT_START;
         }
         break;
-
     case RX_PAYLOAD:
         rxBuf[rxIdx++] = b;
-        if (rxIdx == STEERING_STATUS_LEN - 1)
-            rxState = RX_CRC;
+        if (rxIdx == STEERING_STATUS_LEN - 1) rxState = RX_CRC;
         break;
-
     case RX_CRC:
         rxBuf[rxIdx] = b;
         ProcessStatusPacket(rxBuf);
@@ -163,7 +181,6 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
         break;
     }
 
-    /* Re-arm for the next byte */
     HAL_UART_Receive_IT(&steeringUart, (uint8_t *)&steeringRxByte, 1);
 }
 
@@ -173,13 +190,9 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
         return;
 
     diag.uart_errors++;
-
-    /* Clear hardware error flags so the peripheral can receive again */
     __HAL_UART_CLEAR_OREFLAG(huart);
     __HAL_UART_CLEAR_FEFLAG(huart);
     __HAL_UART_CLEAR_NEFLAG(huart);
-
-    /* Re-arm */
     HAL_UART_Receive_IT(&steeringUart, (uint8_t *)&steeringRxByte, 1);
 }
 
@@ -217,59 +230,71 @@ void SteeringInit(void)
     steeringUart.Init.ClockPrescaler = UART_PRESCALER_DIV1;
     diag.init_ok = (HAL_UART_Init(&steeringUart) == HAL_OK) ? 1 : 0;
 
-    /* Enable UART5 interrupt and arm RX */
+    diag.hstate = STEERING_STATE_IDLE;
+
     HAL_NVIC_SetPriority(UART5_IRQn, 5, 0);
     HAL_NVIC_EnableIRQ(UART5_IRQn);
     HAL_UART_Receive_IT(&steeringUart, (uint8_t *)&steeringRxByte, 1);
 
-    /* Send initial straight-angle command */
-    SendAngles(STEERING_ANGLE_STRAIGHT, STEERING_ANGLE_STRAIGHT,
-               STEERING_ANGLE_STRAIGHT, STEERING_ANGLE_STRAIGHT);
+    SendAnglesRaw(STEERING_ANGLE_STRAIGHT, STEERING_ANGLE_STRAIGHT,
+                  STEERING_ANGLE_STRAIGHT, STEERING_ANGLE_STRAIGHT);
 }
 
 void SteeringPoll(void)
 {
     uint32_t now = HAL_GetTick();
 
-    /* Link-loss detection: clear stale angles if no packet arrived recently */
+    /* Link-loss detection */
     if (diag.link_active &&
         (now - diag.last_rx_tick >= STEERING_LINK_TIMEOUT_MS)) {
         diag.link_active = 0;
         diag.link_lost_count++;
         memset(&lastStatus, 0, sizeof(lastStatus));
+        diag.hstate = STEERING_STATE_LINK_LOST;
     }
 
-    /* Periodic status refresh — keeps cached data fresh for any consumer
-     * (CLI, TCP, telemetry) without requiring an explicit request. */
+    /* Periodic status refresh */
     if (now - lastRefreshTick >= STEERING_REFRESH_MS) {
         lastRefreshTick = now;
         SendQuery();
     }
 
+    /* Update H5 sub-state based on wheel positions (only when link is up) */
+    if (diag.link_active && diag.hstate == STEERING_STATE_MOVING) {
+        if (SteeringWheelsReady(STEERING_SETTLED_DEG))
+            diag.hstate = STEERING_STATE_AT_TARGET;
+    }
+
+    /* Dispatch angle commands on rover state change */
     rover_state_t state = CurrentRoverState();
     if (state == lastRoverState)
         return;
     lastRoverState = state;
 
+    /* rover_controller.c already called SetSteeringAngles() for states that
+     * need custom angles (TRAVERSE, WHEEL_CONTROL, STEER_ONLY, SPIN_*).
+     * Here we only handle states that need explicit straight-ahead reset. */
     switch (state) {
-    case ROVER_TURN_RIGHT:
-        SendAngles(STEERING_SPIN_FL, STEERING_SPIN_FR,
-                   STEERING_SPIN_RL, STEERING_SPIN_RR);
-        break;
-    case ROVER_TURN_LEFT:
-        SendAngles(-STEERING_SPIN_FL, -STEERING_SPIN_FR,
-                   -STEERING_SPIN_RL, -STEERING_SPIN_RR);
+    case ROVER_IDLE:
+    case ROVER_READY:
+    case ROVER_ESTOP:
+        SendAnglesRaw(STEERING_ANGLE_STRAIGHT, STEERING_ANGLE_STRAIGHT,
+                      STEERING_ANGLE_STRAIGHT, STEERING_ANGLE_STRAIGHT);
+        targetFl = targetFr = targetRl = targetRr = 0.0f;
         break;
     default:
-        SendAngles(STEERING_ANGLE_STRAIGHT, STEERING_ANGLE_STRAIGHT,
-                   STEERING_ANGLE_STRAIGHT, STEERING_ANGLE_STRAIGHT);
         break;
     }
 }
 
 void SetSteeringAngles(float fl, float fr, float rl, float rr)
 {
-    SendAngles(fl, fr, rl, rr);
+    targetFl = fl; targetFr = fr; targetRl = rl; targetRr = rr;
+    SendAnglesRaw(fl, fr, rl, rr);
+
+    if (diag.hstate != STEERING_STATE_DISABLED &&
+        diag.hstate != STEERING_STATE_LINK_LOST)
+        diag.hstate = STEERING_STATE_MOVING;
 }
 
 void SteeringRequestStatus(void)
@@ -285,6 +310,33 @@ void SteeringHome(void)
 void SteeringResetDriver(uint8_t idx)
 {
     SendResetCommand(idx);
+    diag.hstate = STEERING_STATE_RESETTING;
+}
+
+void SteeringForceDisable(uint8_t idx)
+{
+    SendDisableCommand(idx);
+    diag.hstate = STEERING_STATE_DISABLED;
+}
+
+void SteeringForceEnable(uint8_t idx)
+{
+    SendEnableCommand(idx);
+    if (diag.hstate == STEERING_STATE_DISABLED)
+        diag.hstate = STEERING_STATE_IDLE;
+}
+
+uint8_t SteeringWheelsReady(float tolerance_deg)
+{
+    if (!diag.link_active || !diag.ever_connected)
+        return 0;
+
+    float d0 = lastStatus.fl - targetFl; if (d0 < 0.0f) d0 = -d0;
+    float d1 = lastStatus.fr - targetFr; if (d1 < 0.0f) d1 = -d1;
+    float d2 = lastStatus.rl - targetRl; if (d2 < 0.0f) d2 = -d2;
+    float d3 = lastStatus.rr - targetRr; if (d3 < 0.0f) d3 = -d3;
+    return (d0 <= tolerance_deg && d1 <= tolerance_deg &&
+            d2 <= tolerance_deg && d3 <= tolerance_deg) ? 1U : 0U;
 }
 
 steering_status_t GetSteeringStatus(void)
@@ -292,6 +344,11 @@ steering_status_t GetSteeringStatus(void)
     steering_status_t s = lastStatus;
     lastStatus.valid = 0;
     return s;
+}
+
+steering_status_t GetSteeringStatusPeek(void)
+{
+    return lastStatus;
 }
 
 steering_diag_t GetSteeringDiag(void)

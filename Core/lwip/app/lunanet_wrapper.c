@@ -67,7 +67,7 @@ int NetworkPoll(void){
   // Handle timeouts
   sys_check_timeouts();
   /* Pass priority to the TCP server */
-  //tcp_task();
+  tcp_task();
 #if LWIP_NETIF_LINK_CALLBACK
   Ethernet_Link_Periodic_Handle(&gnetif);
 #endif
