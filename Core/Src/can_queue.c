@@ -338,6 +338,22 @@ void can_transmit_eid(FDCAN_HandleTypeDef *hfdcan, uint32_t id, const uint8_t *d
 }
 
 /* ==========================================================================
+ * Generic RX FIFO drain
+ * ========================================================================== */
+void CAN_RxFifoPoll(FDCAN_HandleTypeDef *hfdcan, uint32_t fifo, CAN_RxCallback_t cb)
+{
+    FDCAN_RxHeaderTypeDef hdr;
+    uint8_t data[8];
+
+    while (HAL_FDCAN_GetRxMessage(hfdcan, fifo, &hdr, data) == HAL_OK) {
+        /* Convert FDCAN DLC constant to actual byte count.
+         * FDCAN_DLC_BYTES_N = (N << 16), so bits 19:16 give the count. */
+        uint8_t len = (uint8_t)((hdr.DataLength >> 16) & 0x0FU);
+        cb(hfdcan, hdr.Identifier, (uint8_t)hdr.IdType, data, len);
+    }
+}
+
+/* ==========================================================================
  * Weak application callbacks
  * ========================================================================== */
 __weak void CAN_BusOffCallback(FDCAN_HandleTypeDef *hfdcan)

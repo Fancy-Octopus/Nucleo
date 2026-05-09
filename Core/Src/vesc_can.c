@@ -38,6 +38,11 @@ typedef enum {
     CAN_PACKET_SET_CURRENT_BRAKE_REL     = 11,
     CAN_PACKET_SET_CURRENT_HANDBRAKE     = 12,
     CAN_PACKET_SET_CURRENT_HANDBRAKE_REL = 13,
+    CAN_PACKET_STATUS                    = 9,   /* rpm, current, duty */
+    CAN_PACKET_STATUS_2                  = 14,  /* amp_hours, amp_hours_charged */
+    CAN_PACKET_STATUS_3                  = 15,  /* watt_hours, watt_hours_charged */
+    CAN_PACKET_STATUS_4                  = 16,  /* temp_fet, temp_motor, current_in */
+    CAN_PACKET_STATUS_5                  = 27,  /* tacho, v_in */
     CAN_PACKET_MAKE_ENUM_32_BITS         = 0xFFFFFFFF,
 } CAN_PACKET_ID;
 
@@ -46,6 +51,11 @@ typedef enum {
  * -------------------------------------------------------------------------- */
 static FDCAN_HandleTypeDef *vescCanHandle = NULL;
 static schedule_t           canbus_schedule;
+
+/* Fixed order: FD(5), BD(6), FL(10), FR(11), BL(12), BR(13) */
+static const uint8_t vesc_ids[VESC_COUNT]   = {5,    6,    10,   11,   12,   13  };
+static const char   *vesc_names[VESC_COUNT] = {"FD", "BD", "FL", "FR", "BL", "BR"};
+static vesc_controller_t vesc_controllers[VESC_COUNT];
 
 /* --------------------------------------------------------------------------
  * Buffer helpers (private)
@@ -72,6 +82,87 @@ static void buffer_append_float16(uint8_t *buffer, float number, float scale, in
 static void buffer_append_float32(uint8_t *buffer, float number, float scale, int32_t *index)
 {
     buffer_append_int32(buffer, (int32_t)(number * scale), index);
+}
+
+/* --------------------------------------------------------------------------
+ * RX buffer helpers — big-endian reads for VESC status packets
+ * -------------------------------------------------------------------------- */
+static int32_t buf_get_i32(const uint8_t *b, int32_t *i)
+{
+    int32_t r = ((int32_t)b[*i] << 24) | ((int32_t)b[*i + 1] << 16) |
+                ((int32_t)b[*i + 2] << 8) | b[*i + 3];
+    *i += 4;
+    return r;
+}
+
+static int16_t buf_get_i16(const uint8_t *b, int32_t *i)
+{
+    int16_t r = (int16_t)(((uint16_t)b[*i] << 8) | b[*i + 1]);
+    *i += 2;
+    return r;
+}
+
+/* --------------------------------------------------------------------------
+ * VESC status reception
+ * -------------------------------------------------------------------------- */
+static int VescFindIdx(uint8_t node_id)
+{
+    for (int i = 0; i < VESC_COUNT; i++)
+        if (vesc_ids[i] == node_id) return i;
+    return -1;
+}
+
+static void VescProcessStatus(uint8_t node_id, uint8_t pkt_type, const uint8_t *data)
+{
+    int idx = VescFindIdx(node_id);
+    if (idx < 0) return;
+
+    vesc_report_t *r = &vesc_controllers[idx].status;
+    r->node_id      = node_id;
+    r->connected    = 1;
+    r->last_rx_tick = HAL_GetTick();
+
+    int32_t i = 0;
+    switch (pkt_type) {
+    case CAN_PACKET_STATUS:
+        r->rpm     =  buf_get_i32(data, &i);
+        r->current =  buf_get_i16(data, &i) / 10.0f;
+        r->duty    =  buf_get_i16(data, &i) / 1000.0f;
+        break;
+    case CAN_PACKET_STATUS_2:
+        r->amp_hours         = buf_get_i32(data, &i) / 10000.0f;
+        r->amp_hours_charged = buf_get_i32(data, &i) / 10000.0f;
+        break;
+    case CAN_PACKET_STATUS_3:
+        r->watt_hours         = buf_get_i32(data, &i) / 10000.0f;
+        r->watt_hours_charged = buf_get_i32(data, &i) / 10000.0f;
+        break;
+    case CAN_PACKET_STATUS_4:
+        r->temp_fet   = buf_get_i16(data, &i) / 10.0f;
+        r->temp_motor = buf_get_i16(data, &i) / 10.0f;
+        r->current_in = buf_get_i16(data, &i) / 10.0f;
+        buf_get_i16(data, &i);  /* pid_pos_now — not stored */
+        break;
+    case CAN_PACKET_STATUS_5:
+        r->tacho = buf_get_i32(data, &i) / 6;
+        r->v_in  = buf_get_i16(data, &i) / 10.0f;
+        break;
+    default:
+        break;
+    }
+}
+
+static void VescRxCallback(FDCAN_HandleTypeDef *hfdcan, uint32_t id, uint8_t id_type,
+                           const uint8_t *data, uint8_t len)
+{
+    (void)hfdcan; (void)len;
+    if (id_type != FDCAN_EXTENDED_ID) return;
+    VescProcessStatus((uint8_t)(id & 0xFFU), (uint8_t)((id >> 8) & 0xFFU), data);
+}
+
+static void VescRxDrain(void)
+{
+    CAN_RxFifoPoll(vescCanHandle, FDCAN_RX_FIFO0, VescRxCallback);
 }
 
 /* --------------------------------------------------------------------------
@@ -122,6 +213,12 @@ int VescInit(FDCAN_HandleTypeDef *hfdcan)
 
     vescCanHandle = hfdcan;
 
+    /* Pre-fill name and node_id so getters work even before any packet arrives */
+    for (int i = 0; i < VESC_COUNT; i++) {
+        vesc_controllers[i].name            = vesc_names[i];
+        vesc_controllers[i].status.node_id  = vesc_ids[i];
+    }
+
     sFilterConfig.IdType       = FDCAN_EXTENDED_ID;
     sFilterConfig.FilterIndex  = 0;
     sFilterConfig.FilterType   = FDCAN_FILTER_MASK;
@@ -148,9 +245,11 @@ int VescInit(FDCAN_HandleTypeDef *hfdcan)
  * -------------------------------------------------------------------------- */
 void VescPoll(void)
 {
-    if(vescCanHandle == NULL)           return;
-    if(!ScheduleReady(canbus_schedule)) return;
+    if (vescCanHandle == NULL) return;
 
+    VescRxDrain();  /* drain FIFO0 on every call, independently of TX schedule */
+
+    if (!ScheduleReady(canbus_schedule)) return;
     ResetSchedule(&canbus_schedule);
 
     switch(CurrentRoverState())
@@ -343,4 +442,27 @@ void comm_can_set_handbrake_rel(uint8_t controller_id, float current_rel)
     uint8_t buffer[4];
     buffer_append_float32(buffer, current_rel, 1e5f, &send_index);
     can_transmit_eid(vescCanHandle, controller_id | ((uint32_t)CAN_PACKET_SET_CURRENT_HANDBRAKE_REL << 8), buffer, send_index);
+}
+
+/* --------------------------------------------------------------------------
+ * Public status accessors
+ * -------------------------------------------------------------------------- */
+int VescGetReport(uint8_t node_id, vesc_report_t *out)
+{
+    int idx = VescFindIdx(node_id);
+    if (idx < 0) return -1;
+    *out = vesc_controllers[idx].status;
+    return 0;
+}
+
+void VescGetAllReports(vesc_report_t out[VESC_COUNT])
+{
+    for (int i = 0; i < VESC_COUNT; i++)
+        out[i] = vesc_controllers[i].status;
+}
+
+void VescGetAllControllers(vesc_controller_t out[VESC_COUNT])
+{
+    for (int i = 0; i < VESC_COUNT; i++)
+        out[i] = vesc_controllers[i];
 }

@@ -112,6 +112,28 @@ void    CanQueue_Poll(void);
 void can_transmit_eid(FDCAN_HandleTypeDef *hfdcan, uint32_t id, const uint8_t *data, uint8_t len);
 
 /* ==========================================================================
+ * Generic RX FIFO drain
+ *
+ * Drains all pending messages from the specified FIFO and delivers each one
+ * to the provided callback. Decouples RX handling from any specific
+ * subsystem (e.g. VESC) so the CAN bus layer stays module-agnostic.
+ *
+ * Parameters:
+ *   hfdcan  - peripheral handle
+ *   fifo    - FDCAN_RX_FIFO0 or FDCAN_RX_FIFO1
+ *   cb      - called once per received frame; 'len' is the actual byte count
+ *             (0–8 for classic CAN). 'id_type' is FDCAN_STANDARD_ID or
+ *             FDCAN_EXTENDED_ID.
+ * ========================================================================== */
+typedef void (*CAN_RxCallback_t)(FDCAN_HandleTypeDef *hfdcan,
+                                  uint32_t             id,
+                                  uint8_t              id_type,
+                                  const uint8_t       *data,
+                                  uint8_t              len);
+
+void CAN_RxFifoPoll(FDCAN_HandleTypeDef *hfdcan, uint32_t fifo, CAN_RxCallback_t cb);
+
+/* ==========================================================================
  * Bus recovery
  * Must be called from the main loop. Uses its own internal schedule timer
  * so it is safe to call as frequently as desired.

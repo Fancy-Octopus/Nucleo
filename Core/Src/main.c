@@ -25,7 +25,7 @@
 //#include "odrive_can.h"
 #include "vesc_can.h"
 #include "can_queue.h"
-#include "winch.h"
+#include "roboclaw.h"
 #include "lunanet_wrapper.h"
 #include "lunaterm.h"
 #include "rover_controller.h"
@@ -144,7 +144,8 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-	WinchInit();
+	RoboclawInit();
+	SteeringInit();
 	//if(OdriveInit(&hfdcan1) != 0){
 	//	Error_Handler();
 	//}
@@ -162,7 +163,7 @@ int main(void)
   SetScheduledTime(&toggleLEDs,500);
   while (1)
   {
-    WinchPoll();
+    RoboclawPoll();
     //OdrivePoll();
     VescPoll();
     NetworkPoll();

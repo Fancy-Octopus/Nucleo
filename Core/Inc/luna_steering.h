@@ -8,6 +8,34 @@
 #ifndef INC_LUNA_STEERING_H_
 #define INC_LUNA_STEERING_H_
 
-void SteeringPoll(void);
+#include <stdint.h>
+
+/* ---- Packet framing ---- */
+#define STEERING_START_BYTE       0xAAU
+#define STEERING_CMD_TYPE         0x01U
+#define STEERING_STATUS_TYPE      0x02U
+#define STEERING_CMD_LEN          19U   /* [start][type][FL:4][FR:4][RL:4][RR:4][crc] */
+#define STEERING_STATUS_LEN       20U   /* [start][type][FL:4][FR:4][RL:4][RR:4][flags][crc] */
+
+/* ---- Angle constants (degrees) ---- */
+#define STEERING_ANGLE_STRAIGHT   0.0f
+
+#define STEERING_SPIN_FL          45.0f
+#define STEERING_SPIN_FR         -45.0f
+#define STEERING_SPIN_RL         -45.0f
+#define STEERING_SPIN_RR          45.0f
+
+/* ---- Status struct ---- */
+typedef struct {
+    float   fl, fr, rl, rr;  /* angles reported by the L4 stepper controller */
+    uint8_t flags;            /* L4 status flags (reserved) */
+    uint8_t valid;            /* 1 if an unread packet is available, cleared on read */
+} steering_status_t;
+
+/* ---- Public API ---- */
+void              SteeringInit(void);
+void              SteeringPoll(void);
+void              SetSteeringAngles(float fl, float fr, float rl, float rr);
+steering_status_t GetSteeringStatus(void);
 
 #endif /* INC_LUNA_STEERING_H_ */
