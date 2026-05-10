@@ -55,6 +55,19 @@ typedef enum {
     /* --- Tier 4 --- */
     ROVER_WHEEL_CONTROL    = 48U,  /* context.wheel[4].{speed, angle}        */
 
+    /* ---- Force variants (64-71) -----------------------------------------
+     * Identical to their counterparts but the wheel-motor subsystem bypasses
+     * the steering-settled gate and drives immediately.
+     * -------------------------------------------------------------------- */
+    ROVER_FORWARD_FORCE        = 64U,
+    ROVER_BACKWARD_FORCE       = 65U,
+    ROVER_SPIN_RIGHT_FORCE     = 66U,
+    ROVER_SPIN_LEFT_FORCE      = 67U,
+    ROVER_DRIVE_FORCE          = 68U,  /* context.drive_speed                */
+    ROVER_SPIN_FORCE           = 69U,  /* context.spin_speed                 */
+    ROVER_TRAVERSE_FORCE       = 70U,  /* context.drive_speed + steer angles */
+    ROVER_WHEEL_CONTROL_FORCE  = 71U,  /* context.wheel[4].{speed, angle}    */
+
 } rover_state_t;
 
 /* ---- Per-wheel entry for Tier 4 ---------------------------------------- */
@@ -105,12 +118,6 @@ void                   SetDefaultState(rover_state_t safeState);
 
 rover_state_t          CurrentRoverState(void);
 const rover_context_t *CurrentRoverContext(void);
-
-/* 0 while steering is settling toward a new target angle */
-uint8_t                RoverDriveEnabled(void);
-
-/* 1 when the rover began driving despite wheels not fully settled */
-uint8_t                RoverSteeringBypassed(void);
 
 void                   ControllerInit(void);
 void                   ControllerPoll(void);

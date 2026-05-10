@@ -204,13 +204,22 @@ void PrintRoverState(EmbeddedCli *cli, char *args, void *context)
     case ROVER_ARM_MOVE:         name = "ARM_MOVE (T2)";    break;
     case ROVER_TRAVERSE:         name = "TRAVERSE (T3)";    break;
     case ROVER_STEER_ONLY:       name = "STEER_ONLY (T3)";  break;
-    case ROVER_WHEEL_CONTROL:    name = "WHEEL_CONTROL (T4)"; break;
-    default:                     name = "UNKNOWN";          break;
+    case ROVER_WHEEL_CONTROL:       name = "WHEEL_CONTROL (T4)";       break;
+    case ROVER_FORWARD_FORCE:       name = "FORWARD_FORCE";            break;
+    case ROVER_BACKWARD_FORCE:      name = "BACKWARD_FORCE";           break;
+    case ROVER_SPIN_RIGHT_FORCE:    name = "SPIN_RIGHT_FORCE";         break;
+    case ROVER_SPIN_LEFT_FORCE:     name = "SPIN_LEFT_FORCE";          break;
+    case ROVER_DRIVE_FORCE:         name = "DRIVE_FORCE (T2)";         break;
+    case ROVER_SPIN_FORCE:          name = "SPIN_FORCE (T2)";          break;
+    case ROVER_TRAVERSE_FORCE:      name = "TRAVERSE_FORCE (T3)";      break;
+    case ROVER_WHEEL_CONTROL_FORCE: name = "WHEEL_CONTROL_FORCE (T4)"; break;
+    default:                        name = "UNKNOWN";                  break;
     }
+    steering_diag_t d = GetSteeringDiag();
     printf("State:    %s (%u)\r\n", name, (unsigned)state);
-    printf("Drive:    %s%s\r\n",
-           RoverDriveEnabled()      ? "ENABLED"  : "GATED",
-           RoverSteeringBypassed()  ? " (bypass)" : "");
+    printf("Steer:    %s  wheels=%s\r\n",
+           HstateName(d.hstate),
+           SteeringWheelsReady(STEERING_SETTLED_DEG) ? "READY" : "NOT READY");
 
     /* Print context fields relevant to the current tier */
     if (state == ROVER_DRIVE || state == ROVER_TRAVERSE) {
@@ -368,10 +377,9 @@ void PrintStepperStats(EmbeddedCli *cli, char *args, void *context)
            (unsigned long)d.rx_bytes,  (unsigned long)d.rx_good,
            (unsigned long)d.rx_bad_crc, (unsigned long)d.uart_errors);
 
-    /* ---- Drive gate ---- */
-    printf("Drive:    %s%s\r\n",
-           RoverDriveEnabled()     ? "ENABLED"  : "GATED",
-           RoverSteeringBypassed() ? " (bypass)" : "");
+    /* ---- Steering gate ---- */
+    printf("Wheels:   %s\r\n",
+           SteeringWheelsReady(STEERING_SETTLED_DEG) ? "READY" : "NOT READY");
 
     /* ---- Wheel angles ---- */
     if (d.link_active) {

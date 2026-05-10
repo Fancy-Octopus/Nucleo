@@ -10,6 +10,7 @@
 #include "lunautils.h"
 #include "luna_wait.h"
 #include "rover_controller.h"
+#include "luna_steering.h"
 
 /* --------------------------------------------------------------------------
  * VESC node IDs
@@ -153,24 +154,22 @@ void VescPoll(void)
 
     rover_state_t          state = CurrentRoverState();
     const rover_context_t *ctx   = CurrentRoverContext();
-    uint8_t                drive = RoverDriveEnabled();
 
     switch (state)
     {
-    /* ---- Tier 1: all-stop states ---- */
+    /* ---- Stop states ---- */
     case ROVER_IDLE:
     case ROVER_READY:
+    case ROVER_ESTOP:
     case ROVER_STEER_ONLY:
         AllStop();
         break;
 
-    /* ---- Tier 1: ESTOP — zero everything ---- */
-    case ROVER_ESTOP:
-        AllStop();
-        break;
-
-    /* ---- Tier 1: straight forward ---- */
+    /* ---- Tier 1: straight forward — wait for steering ---- */
     case ROVER_FORWARD:
+        if (!SteeringWheelsReady(STEERING_SETTLED_DEG)) { AllStop(); break; }
+        /* fall through */
+    case ROVER_FORWARD_FORCE:
         comm_can_set_rpm(VESC_FL,  VESC_WHEEL_SPEED);
         comm_can_set_rpm(VESC_FR,  VESC_WHEEL_SPEED);
         comm_can_set_rpm(VESC_BL,  VESC_WHEEL_SPEED);
@@ -179,8 +178,11 @@ void VescPoll(void)
         comm_can_set_rpm(VESC_BD, 0.0f);
         break;
 
-    /* ---- Tier 1: straight backward ---- */
+    /* ---- Tier 1: straight backward — wait for steering ---- */
     case ROVER_BACKWARD:
+        if (!SteeringWheelsReady(STEERING_SETTLED_DEG)) { AllStop(); break; }
+        /* fall through */
+    case ROVER_BACKWARD_FORCE:
         comm_can_set_rpm(VESC_FL, -VESC_WHEEL_SPEED);
         comm_can_set_rpm(VESC_FR, -VESC_WHEEL_SPEED);
         comm_can_set_rpm(VESC_BL, -VESC_WHEEL_SPEED);
@@ -191,39 +193,31 @@ void VescPoll(void)
 
     /* ---- Tier 1: spin-in-place right — wait for steering ---- */
     case ROVER_SPIN_RIGHT:
-        if (drive) {
-            comm_can_set_rpm(VESC_FL,  VESC_WHEEL_SPEED);
-            comm_can_set_rpm(VESC_BL,  VESC_WHEEL_SPEED);
-            comm_can_set_rpm(VESC_FR, -VESC_WHEEL_SPEED);
-            comm_can_set_rpm(VESC_BR, -VESC_WHEEL_SPEED);
-        } else {
-            comm_can_set_rpm(VESC_FL, 0.0f);
-            comm_can_set_rpm(VESC_FR, 0.0f);
-            comm_can_set_rpm(VESC_BL, 0.0f);
-            comm_can_set_rpm(VESC_BR, 0.0f);
-        }
+        if (!SteeringWheelsReady(STEERING_SETTLED_DEG)) { AllStop(); break; }
+        /* fall through */
+    case ROVER_SPIN_RIGHT_FORCE:
+        comm_can_set_rpm(VESC_FL,  VESC_WHEEL_SPEED);
+        comm_can_set_rpm(VESC_BL,  VESC_WHEEL_SPEED);
+        comm_can_set_rpm(VESC_FR, -VESC_WHEEL_SPEED);
+        comm_can_set_rpm(VESC_BR, -VESC_WHEEL_SPEED);
         comm_can_set_rpm(VESC_FD, 0.0f);
         comm_can_set_rpm(VESC_BD, 0.0f);
         break;
 
     /* ---- Tier 1: spin-in-place left — wait for steering ---- */
     case ROVER_SPIN_LEFT:
-        if (drive) {
-            comm_can_set_rpm(VESC_FL, -VESC_WHEEL_SPEED);
-            comm_can_set_rpm(VESC_BL, -VESC_WHEEL_SPEED);
-            comm_can_set_rpm(VESC_FR,  VESC_WHEEL_SPEED);
-            comm_can_set_rpm(VESC_BR,  VESC_WHEEL_SPEED);
-        } else {
-            comm_can_set_rpm(VESC_FL, 0.0f);
-            comm_can_set_rpm(VESC_FR, 0.0f);
-            comm_can_set_rpm(VESC_BL, 0.0f);
-            comm_can_set_rpm(VESC_BR, 0.0f);
-        }
+        if (!SteeringWheelsReady(STEERING_SETTLED_DEG)) { AllStop(); break; }
+        /* fall through */
+    case ROVER_SPIN_LEFT_FORCE:
+        comm_can_set_rpm(VESC_FL, -VESC_WHEEL_SPEED);
+        comm_can_set_rpm(VESC_BL, -VESC_WHEEL_SPEED);
+        comm_can_set_rpm(VESC_FR,  VESC_WHEEL_SPEED);
+        comm_can_set_rpm(VESC_BR,  VESC_WHEEL_SPEED);
         comm_can_set_rpm(VESC_FD, 0.0f);
         comm_can_set_rpm(VESC_BD, 0.0f);
         break;
 
-    /* ---- Tier 1: dig states ---- */
+    /* ---- Tier 1: dig states — wheels stopped, drums run ---- */
     case ROVER_DIG_FORWARD:
     case ROVER_DIG_BACKWARD:
         comm_can_set_rpm(VESC_FL, 0.0f);
@@ -252,8 +246,11 @@ void VescPoll(void)
         comm_can_set_rpm(VESC_BD, -VESC_DRUM_SPEED);
         break;
 
-    /* ---- Tier 2: proportional drive ---- */
+    /* ---- Tier 2: proportional drive — wait for steering ---- */
     case ROVER_DRIVE:
+        if (!SteeringWheelsReady(STEERING_SETTLED_DEG)) { AllStop(); break; }
+        /* fall through */
+    case ROVER_DRIVE_FORCE:
         comm_can_set_rpm(VESC_FL, ctx->drive_speed);
         comm_can_set_rpm(VESC_FR, ctx->drive_speed);
         comm_can_set_rpm(VESC_BL, ctx->drive_speed);
@@ -264,20 +261,17 @@ void VescPoll(void)
 
     /* ---- Tier 2: proportional spin — wait for steering ---- */
     case ROVER_SPIN: {
-        float spd = (ctx->spin_speed >= 0.0f) ?  ctx->spin_speed
-                                                : -ctx->spin_speed;
-        float sign = (ctx->spin_speed >= 0.0f) ? 1.0f : -1.0f;
-        if (drive) {
-            comm_can_set_rpm(VESC_FL,  sign * spd);
-            comm_can_set_rpm(VESC_BL,  sign * spd);
-            comm_can_set_rpm(VESC_FR, -sign * spd);
-            comm_can_set_rpm(VESC_BR, -sign * spd);
-        } else {
-            comm_can_set_rpm(VESC_FL, 0.0f);
-            comm_can_set_rpm(VESC_FR, 0.0f);
-            comm_can_set_rpm(VESC_BL, 0.0f);
-            comm_can_set_rpm(VESC_BR, 0.0f);
-        }
+        if (!SteeringWheelsReady(STEERING_SETTLED_DEG)) { AllStop(); break; }
+        /* fall through — C requires a statement before fall-through label */
+    }
+        /* fall through */
+    case ROVER_SPIN_FORCE: {
+        float spd  = (ctx->spin_speed >= 0.0f) ?  ctx->spin_speed : -ctx->spin_speed;
+        float sign = (ctx->spin_speed >= 0.0f) ?  1.0f            : -1.0f;
+        comm_can_set_rpm(VESC_FL,  sign * spd);
+        comm_can_set_rpm(VESC_BL,  sign * spd);
+        comm_can_set_rpm(VESC_FR, -sign * spd);
+        comm_can_set_rpm(VESC_BR, -sign * spd);
         comm_can_set_rpm(VESC_FD, 0.0f);
         comm_can_set_rpm(VESC_BD, 0.0f);
         break;
@@ -285,34 +279,26 @@ void VescPoll(void)
 
     /* ---- Tier 3: traverse — all wheels same speed, custom steering ---- */
     case ROVER_TRAVERSE:
-        if (drive) {
-            comm_can_set_rpm(VESC_FL, ctx->drive_speed);
-            comm_can_set_rpm(VESC_FR, ctx->drive_speed);
-            comm_can_set_rpm(VESC_BL, ctx->drive_speed);
-            comm_can_set_rpm(VESC_BR, ctx->drive_speed);
-        } else {
-            comm_can_set_rpm(VESC_FL, 0.0f);
-            comm_can_set_rpm(VESC_FR, 0.0f);
-            comm_can_set_rpm(VESC_BL, 0.0f);
-            comm_can_set_rpm(VESC_BR, 0.0f);
-        }
+        if (!SteeringWheelsReady(STEERING_SETTLED_DEG)) { AllStop(); break; }
+        /* fall through */
+    case ROVER_TRAVERSE_FORCE:
+        comm_can_set_rpm(VESC_FL, ctx->drive_speed);
+        comm_can_set_rpm(VESC_FR, ctx->drive_speed);
+        comm_can_set_rpm(VESC_BL, ctx->drive_speed);
+        comm_can_set_rpm(VESC_BR, ctx->drive_speed);
         comm_can_set_rpm(VESC_FD, 0.0f);
         comm_can_set_rpm(VESC_BD, 0.0f);
         break;
 
     /* ---- Tier 4: per-wheel speed and angle ---- */
     case ROVER_WHEEL_CONTROL:
-        if (drive) {
-            comm_can_set_rpm(VESC_FL, ctx->wheel[0].speed);
-            comm_can_set_rpm(VESC_FR, ctx->wheel[1].speed);
-            comm_can_set_rpm(VESC_BL, ctx->wheel[2].speed);
-            comm_can_set_rpm(VESC_BR, ctx->wheel[3].speed);
-        } else {
-            comm_can_set_rpm(VESC_FL, 0.0f);
-            comm_can_set_rpm(VESC_FR, 0.0f);
-            comm_can_set_rpm(VESC_BL, 0.0f);
-            comm_can_set_rpm(VESC_BR, 0.0f);
-        }
+        if (!SteeringWheelsReady(STEERING_SETTLED_DEG)) { AllStop(); break; }
+        /* fall through */
+    case ROVER_WHEEL_CONTROL_FORCE:
+        comm_can_set_rpm(VESC_FL, ctx->wheel[0].speed);
+        comm_can_set_rpm(VESC_FR, ctx->wheel[1].speed);
+        comm_can_set_rpm(VESC_BL, ctx->wheel[2].speed);
+        comm_can_set_rpm(VESC_BR, ctx->wheel[3].speed);
         comm_can_set_rpm(VESC_FD, 0.0f);
         comm_can_set_rpm(VESC_BD, 0.0f);
         break;

@@ -9,6 +9,7 @@
 #define INC_LUNA_STEERING_H_
 
 #include <stdint.h>
+#include "rover_controller.h"
 
 /* ---- Packet framing ---- */
 #define STEERING_START_BYTE       0xAAU
@@ -96,6 +97,7 @@ typedef struct {
 /* ---- Public API ---- */
 void              SteeringInit(void);
 void              SteeringPoll(void);
+
 
 /* Send specific angles to the L4 */
 void              SetSteeringAngles(float fl, float fr, float rl, float rr);

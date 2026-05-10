@@ -163,13 +163,13 @@ int main(void)
   SetScheduledTime(&toggleLEDs,500);
   while (1)
   {
-    RoboclawPoll();
-    //OdrivePoll();
-    VescPoll();
     NetworkPoll();
     LunaTermPoll();
-    ControllerPoll();
     SteeringPoll();
+    //OdrivePoll();
+    VescPoll();
+    RoboclawPoll();
+    ControllerPoll();
     CameraServoPoll();
     CAN_BusRecoveryPoll();
     if(ScheduleReady(toggleLEDs)){

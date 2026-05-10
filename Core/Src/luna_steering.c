@@ -22,7 +22,6 @@ typedef enum {
 static UART_HandleTypeDef steeringUart;
 static steering_status_t  lastStatus;
 static steering_diag_t    diag;
-static rover_state_t      lastRoverState = ROVER_IDLE;
 static uint32_t           lastRefreshTick = 0;
 
 /* Last angles commanded to the L4 — used by SteeringWheelsReady() */
@@ -139,8 +138,9 @@ static void ProcessStatusPacket(const uint8_t *buf)
     diag.link_active    = 1;
     diag.last_rx_tick   = HAL_GetTick();
 
-    /* Update sub-state based on link recovery */
-    if (diag.hstate == STEERING_STATE_LINK_LOST)
+    /* Recover sub-state on link restoration */
+    if (diag.hstate == STEERING_STATE_LINK_LOST ||
+        diag.hstate == STEERING_STATE_RESETTING)
         diag.hstate = STEERING_STATE_IDLE;
 }
 
@@ -243,8 +243,10 @@ void SteeringInit(void)
 void SteeringPoll(void)
 {
     uint32_t now = HAL_GetTick();
+    rover_state_t          roverState = CurrentRoverState();
+    const rover_context_t *ctx        = CurrentRoverContext();
 
-    /* Link-loss detection */
+    /* ---- Link-loss detection ---- */
     if (diag.link_active &&
         (now - diag.last_rx_tick >= STEERING_LINK_TIMEOUT_MS)) {
         diag.link_active = 0;
@@ -253,37 +255,101 @@ void SteeringPoll(void)
         diag.hstate = STEERING_STATE_LINK_LOST;
     }
 
-    /* Periodic status refresh */
-    if (now - lastRefreshTick >= STEERING_REFRESH_MS) {
-        lastRefreshTick = now;
-        SendQuery();
+    /* ---- Steering sub-state machine ---- */
+    switch (diag.hstate) {
+
+    case STEERING_STATE_DISABLED:
+        /* Hold disabled while ESTOP is active; re-enable when it clears */
+        if (roverState != ROVER_ESTOP) {
+            SendEnableCommand(STEERING_RESET_ALL);
+            diag.hstate = STEERING_STATE_IDLE;
+        }
+        break;
+
+    case STEERING_STATE_RESETTING:
+    case STEERING_STATE_LINK_LOST:
+        /* Transitions back to IDLE are handled in ProcessStatusPacket */
+        break;
+
+    default:
+        /* Enter DISABLED on ESTOP */
+        if (roverState == ROVER_ESTOP) {
+            SendDisableCommand(STEERING_RESET_ALL);
+            diag.hstate = STEERING_STATE_DISABLED;
+            break;
+        }
+        /* MOVING → AT_TARGET once wheels have settled */
+        if (diag.link_active && diag.hstate == STEERING_STATE_MOVING) {
+            if (SteeringWheelsReady(STEERING_SETTLED_DEG))
+                diag.hstate = STEERING_STATE_AT_TARGET;
+        }
+        break;
     }
 
-    /* Update H5 sub-state based on wheel positions (only when link is up) */
-    if (diag.link_active && diag.hstate == STEERING_STATE_MOVING) {
-        if (SteeringWheelsReady(STEERING_SETTLED_DEG))
-            diag.hstate = STEERING_STATE_AT_TARGET;
-    }
+    /* ---- Target computation from current rover state --------------------
+     * Updates local targets every tick so SteeringWheelsReady() is always
+     * current.  IDLE / READY / ESTOP / arm / dig states hold the last
+     * commanded setpoint (no change).
+     * ------------------------------------------------------------------- */
+    switch (roverState) {
 
-    /* Dispatch angle commands on rover state change */
-    rover_state_t state = CurrentRoverState();
-    if (state == lastRoverState)
-        return;
-    lastRoverState = state;
-
-    /* rover_controller.c already called SetSteeringAngles() for states that
-     * need custom angles (TRAVERSE, WHEEL_CONTROL, STEER_ONLY, SPIN_*).
-     * Here we only handle states that need explicit straight-ahead reset. */
-    switch (state) {
-    case ROVER_IDLE:
-    case ROVER_READY:
-    case ROVER_ESTOP:
-        SendAnglesRaw(STEERING_ANGLE_STRAIGHT, STEERING_ANGLE_STRAIGHT,
-                      STEERING_ANGLE_STRAIGHT, STEERING_ANGLE_STRAIGHT);
+    case ROVER_FORWARD:        case ROVER_FORWARD_FORCE:
+    case ROVER_BACKWARD:       case ROVER_BACKWARD_FORCE:
+    case ROVER_DRIVE:          case ROVER_DRIVE_FORCE:
+    case ROVER_DIG_FORWARD:    case ROVER_DIG_BACKWARD:
+    case ROVER_DEPOSIT_FORWARD: case ROVER_DEPOSIT_BACKWARD:
         targetFl = targetFr = targetRl = targetRr = 0.0f;
         break;
+
+    case ROVER_SPIN_RIGHT:     case ROVER_SPIN_RIGHT_FORCE:
+        targetFl =  STEERING_SPIN_FL;  targetFr =  STEERING_SPIN_FR;
+        targetRl =  STEERING_SPIN_RL;  targetRr =  STEERING_SPIN_RR;
+        break;
+
+    case ROVER_SPIN_LEFT:      case ROVER_SPIN_LEFT_FORCE:
+        targetFl = -STEERING_SPIN_FL;  targetFr = -STEERING_SPIN_FR;
+        targetRl = -STEERING_SPIN_RL;  targetRr = -STEERING_SPIN_RR;
+        break;
+
+    case ROVER_SPIN:           case ROVER_SPIN_FORCE:
+        if (ctx->spin_speed >= 0.0f) {
+            targetFl =  STEERING_SPIN_FL;  targetFr =  STEERING_SPIN_FR;
+            targetRl =  STEERING_SPIN_RL;  targetRr =  STEERING_SPIN_RR;
+        } else {
+            targetFl = -STEERING_SPIN_FL;  targetFr = -STEERING_SPIN_FR;
+            targetRl = -STEERING_SPIN_RL;  targetRr = -STEERING_SPIN_RR;
+        }
+        break;
+
+    case ROVER_TRAVERSE:       case ROVER_TRAVERSE_FORCE:
+    case ROVER_STEER_ONLY:
+        targetFl = ctx->steer_fl;  targetFr = ctx->steer_fr;
+        targetRl = ctx->steer_rl;  targetRr = ctx->steer_rr;
+        break;
+
+    case ROVER_WHEEL_CONTROL:  case ROVER_WHEEL_CONTROL_FORCE:
+        targetFl = ctx->wheel[0].angle;  targetFr = ctx->wheel[1].angle;
+        targetRl = ctx->wheel[2].angle;  targetRr = ctx->wheel[3].angle;
+        break;
+
     default:
         break;
+    }
+
+    /* ---- Periodic send to L4: angle setpoint + status query ------------ */
+    if (now - lastRefreshTick >= STEERING_REFRESH_MS) {
+        lastRefreshTick = now;
+        if (diag.hstate != STEERING_STATE_DISABLED) {
+            SendAnglesRaw(targetFl, targetFr, targetRl, targetRr);
+            /* Reflect movement in sub-state */
+            if (diag.hstate != STEERING_STATE_LINK_LOST &&
+                diag.hstate != STEERING_STATE_RESETTING) {
+                diag.hstate = SteeringWheelsReady(STEERING_SETTLED_DEG)
+                              ? STEERING_STATE_AT_TARGET
+                              : STEERING_STATE_MOVING;
+            }
+        }
+        SendQuery();
     }
 }
 

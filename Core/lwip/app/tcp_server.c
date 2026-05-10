@@ -74,6 +74,10 @@ static uint8_t PayloadFloats(uint8_t type)
     if (type < 32U) return 1;   /* Tier 2 rover state */
     if (type < 48U) return 5;   /* Tier 3 rover state */
     if (type < 64U) return 8;   /* Tier 4 rover state */
+    if (type < 68U) return 0;   /* Force Tier 1 (64-67): no payload */
+    if (type < 70U) return 1;   /* Force Tier 2 (68-69): drive/spin speed */
+    if (type < 71U) return 5;   /* Force Tier 3 (70): drive_speed + 4 angles */
+    if (type < 72U) return 8;   /* Force Tier 4 (71): wheel[4] */
     return 0;                   /* query types or unknown → no payload */
 }
 
@@ -113,6 +117,23 @@ static void DispatchRoverCommand(const uint8_t *buf)
             ctx.wheel[i].speed = floats[i * 2U];
             ctx.wheel[i].angle = floats[i * 2U + 1U];
         }
+    } else if (state_byte == 68U || state_byte == 69U) {
+        /* Force Tier 2: ROVER_DRIVE_FORCE=68, ROVER_SPIN_FORCE=69 */
+        if (state_byte == 68U) ctx.drive_speed = floats[0];
+        else                   ctx.spin_speed  = floats[0];
+    } else if (state_byte == 70U) {
+        /* Force Tier 3: ROVER_TRAVERSE_FORCE */
+        ctx.drive_speed = floats[0];
+        ctx.steer_fl    = floats[1];
+        ctx.steer_fr    = floats[2];
+        ctx.steer_rl    = floats[3];
+        ctx.steer_rr    = floats[4];
+    } else if (state_byte == 71U) {
+        /* Force Tier 4: ROVER_WHEEL_CONTROL_FORCE */
+        for (uint8_t i = 0; i < 4U; i++) {
+            ctx.wheel[i].speed = floats[i * 2U];
+            ctx.wheel[i].angle = floats[i * 2U + 1U];
+        }
     }
 
     RequestRoverStateCtx((rover_state_t)state_byte, &ctx);
@@ -120,16 +141,18 @@ static void DispatchRoverCommand(const uint8_t *buf)
 
 /* ---- Telemetry builders ---- */
 
-/* TELEM_ALL: [0xAB][0x80][state][flags][FL][FR][RL][RR][hstate][CRC] = 22 bytes */
+/* TELEM_ALL: [0xAB][0x80][state][flags][FL][FR][RL][RR][hstate][CRC] = 22 bytes
+ * flags: bit0=wheels_ready  bit1=force_state  bit2=link_active */
 static void SendTelemAll(struct tcp_pcb *pcb)
 {
     steering_status_t s = GetSteeringStatusPeek();
     steering_diag_t   d = GetSteeringDiag();
+    uint8_t           st = (uint8_t)CurrentRoverState();
 
     uint8_t flags = 0;
-    if (RoverDriveEnabled())     flags |= 0x01U;
-    if (RoverSteeringBypassed()) flags |= 0x02U;
-    if (d.link_active)           flags |= 0x04U;
+    if (SteeringWheelsReady(STEERING_SETTLED_DEG)) flags |= 0x01U;
+    if (st >= 64U && st < 72U)                     flags |= 0x02U;
+    if (d.link_active)                             flags |= 0x04U;
 
     uint8_t pkt[22];
     pkt[0]  = TELEM_START;
@@ -175,15 +198,16 @@ static void SendTelemSteering(struct tcp_pcb *pcb)
 }
 
 /* TELEM_DRIVE: [0xAB][0x82][state][flags][CRC] = 5 bytes
- * flags: bit0=drive_enabled  bit1=steering_bypassed  bit2=link_active */
+ * flags: bit0=wheels_ready  bit1=force_state  bit2=link_active */
 static void SendTelemDrive(struct tcp_pcb *pcb)
 {
-    steering_diag_t d = GetSteeringDiag();
+    steering_diag_t d  = GetSteeringDiag();
+    uint8_t         st = (uint8_t)CurrentRoverState();
 
     uint8_t flags = 0;
-    if (RoverDriveEnabled())     flags |= 0x01U;
-    if (RoverSteeringBypassed()) flags |= 0x02U;
-    if (d.link_active)           flags |= 0x04U;
+    if (SteeringWheelsReady(STEERING_SETTLED_DEG)) flags |= 0x01U;
+    if (st >= 64U && st < 72U)                     flags |= 0x02U;
+    if (d.link_active)                             flags |= 0x04U;
 
     uint8_t pkt[5];
     pkt[0] = TELEM_START;
