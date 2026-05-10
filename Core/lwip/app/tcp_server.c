@@ -52,18 +52,6 @@ static void  tcp_server_close (struct tcp_pcb *tpcb);
 static void  add_client       (struct tcp_pcb *pcb);
 static void  remove_client    (struct tcp_pcb *pcb);
 
-/* ---- CRC-8 (polynomial 0x07, same as steering UART) ---- */
-static uint8_t Crc8(const uint8_t *data, uint8_t len)
-{
-    uint8_t crc = 0x00;
-    for (uint8_t i = 0; i < len; i++) {
-        crc ^= data[i];
-        for (uint8_t b = 0; b < 8; b++)
-            crc = (crc & 0x80) ? (uint8_t)((crc << 1) ^ 0x07) : (uint8_t)(crc << 1);
-    }
-    return crc;
-}
-
 /* ---- Protocol helpers ---- */
 
 /* Payload float count for a given type byte.
@@ -83,13 +71,46 @@ static uint8_t PayloadFloats(uint8_t type)
 
 static uint8_t CmdPacketLen(uint8_t type)
 {
-    return (uint8_t)(3U + PayloadFloats(type) * 4U);
+    return (uint8_t)(2U + PayloadFloats(type) * 4U);
+}
+
+/* ---- Command ACK ---- */
+static void SendCmdAck(struct tcp_pcb *pcb, uint8_t accepted,
+                       uint8_t reason, uint8_t current_state)
+{
+    uint8_t pkt[5];
+    pkt[0] = TELEM_START;
+    pkt[1] = ACK_CMD;
+    pkt[2] = accepted;
+    pkt[3] = reason;
+    pkt[4] = current_state;
+    err_t err = tcp_write(pcb, pkt, sizeof(pkt), TCP_WRITE_FLAG_COPY);
+    if (err == ERR_OK) tcp_output(pcb);
+}
+
+/* Returns 1 if state_byte maps to a defined rover_state_t enum value. */
+static uint8_t IsKnownRoverState(uint8_t b)
+{
+    if (b <= 22U) return 1U;               /* Tier 1 (0-19) + Tier 2 (20-22)  */
+    if (b == 32U || b == 33U) return 1U;   /* Tier 3: TRAVERSE, STEER_ONLY    */
+    if (b == 48U) return 1U;               /* Tier 4: WHEEL_CONTROL            */
+    if (b >= 64U && b <= 71U) return 1U;   /* Force variants                   */
+    return 0U;
 }
 
 /* ---- Rover command dispatch ---- */
-static void DispatchRoverCommand(const uint8_t *buf)
+static void DispatchRoverCommand(const uint8_t *buf, struct tcp_pcb *pcb)
 {
     uint8_t state_byte = buf[1];
+
+    if (!IsKnownRoverState(state_byte)) {
+        uint8_t reason = (PayloadFloats(state_byte) > 0U)
+                         ? ACK_REASON_NO_CONTEXT
+                         : ACK_REASON_INVALID_ID;
+        SendCmdAck(pcb, 0U, reason, (uint8_t)CurrentRoverState());
+        return;
+    }
+
     uint8_t nf = PayloadFloats(state_byte);
 
     float floats[8] = {0};
@@ -136,17 +157,21 @@ static void DispatchRoverCommand(const uint8_t *buf)
         }
     }
 
-    RequestRoverStateCtx((rover_state_t)state_byte, &ctx);
+    rover_state_t result   = RequestRoverStateCtx((rover_state_t)state_byte, &ctx);
+    uint8_t       current  = (uint8_t)result;
+    uint8_t       accepted = (current == state_byte) ? 1U : 0U;
+    uint8_t       reason   = accepted ? ACK_REASON_OK : ACK_REASON_ESTOP;
+    SendCmdAck(pcb, accepted, reason, current);
 }
 
 /* ---- Telemetry builders ---- */
 
-/* TELEM_ALL: [0xAB][0x80][state][flags][FL][FR][RL][RR][hstate][CRC] = 22 bytes
+/* TELEM_ALL: [0xAB][0x80][state][flags][FL][FR][RL][RR][hstate] = 21 bytes
  * flags: bit0=wheels_ready  bit1=force_state  bit2=link_active */
 static void SendTelemAll(struct tcp_pcb *pcb)
 {
-    steering_status_t s = GetSteeringStatusPeek();
-    steering_diag_t   d = GetSteeringDiag();
+    steering_status_t s  = GetSteeringStatusPeek();
+    steering_diag_t   d  = GetSteeringDiag();
     uint8_t           st = (uint8_t)CurrentRoverState();
 
     uint8_t flags = 0;
@@ -154,23 +179,22 @@ static void SendTelemAll(struct tcp_pcb *pcb)
     if (st >= 64U && st < 72U)                     flags |= 0x02U;
     if (d.link_active)                             flags |= 0x04U;
 
-    uint8_t pkt[22];
+    uint8_t pkt[21];
     pkt[0]  = TELEM_START;
     pkt[1]  = QUERY_ALL;
-    pkt[2]  = (uint8_t)CurrentRoverState();
+    pkt[2]  = st;
     pkt[3]  = flags;
     memcpy(&pkt[4],  &s.fl, 4);
     memcpy(&pkt[8],  &s.fr, 4);
     memcpy(&pkt[12], &s.rl, 4);
     memcpy(&pkt[16], &s.rr, 4);
     pkt[20] = (uint8_t)d.hstate;
-    pkt[21] = Crc8(pkt, 21);
 
     err_t err = tcp_write(pcb, pkt, sizeof(pkt), TCP_WRITE_FLAG_COPY);
     if (err == ERR_OK) tcp_output(pcb);
 }
 
-/* TELEM_STEERING: [0xAB][0x81][FL][FR][RL][RR][steer_flags][hstate][CRC] = 21 bytes
+/* TELEM_STEERING: [0xAB][0x81][FL][FR][RL][RR][steer_flags][hstate] = 20 bytes
  * steer_flags: bit0=link_active  bit1=homed  bit2=homing */
 static void SendTelemSteering(struct tcp_pcb *pcb)
 {
@@ -178,11 +202,11 @@ static void SendTelemSteering(struct tcp_pcb *pcb)
     steering_diag_t   d = GetSteeringDiag();
 
     uint8_t sf = 0;
-    if (d.link_active)                       sf |= 0x01U;
-    if (s.flags & STEERING_FLAG_HOMED)       sf |= 0x02U;
-    if (s.flags & STEERING_FLAG_HOMING)      sf |= 0x04U;
+    if (d.link_active)                  sf |= 0x01U;
+    if (s.flags & STEERING_FLAG_HOMED)  sf |= 0x02U;
+    if (s.flags & STEERING_FLAG_HOMING) sf |= 0x04U;
 
-    uint8_t pkt[21];
+    uint8_t pkt[20];
     pkt[0]  = TELEM_START;
     pkt[1]  = QUERY_STEERING;
     memcpy(&pkt[2],  &s.fl, 4);
@@ -191,13 +215,12 @@ static void SendTelemSteering(struct tcp_pcb *pcb)
     memcpy(&pkt[14], &s.rr, 4);
     pkt[18] = sf;
     pkt[19] = (uint8_t)d.hstate;
-    pkt[20] = Crc8(pkt, 20);
 
     err_t err = tcp_write(pcb, pkt, sizeof(pkt), TCP_WRITE_FLAG_COPY);
     if (err == ERR_OK) tcp_output(pcb);
 }
 
-/* TELEM_DRIVE: [0xAB][0x82][state][flags][CRC] = 5 bytes
+/* TELEM_DRIVE: [0xAB][0x82][state][flags] = 4 bytes
  * flags: bit0=wheels_ready  bit1=force_state  bit2=link_active */
 static void SendTelemDrive(struct tcp_pcb *pcb)
 {
@@ -209,13 +232,23 @@ static void SendTelemDrive(struct tcp_pcb *pcb)
     if (st >= 64U && st < 72U)                     flags |= 0x02U;
     if (d.link_active)                             flags |= 0x04U;
 
-    uint8_t pkt[5];
+    uint8_t pkt[4];
     pkt[0] = TELEM_START;
     pkt[1] = QUERY_DRIVE;
-    pkt[2] = (uint8_t)CurrentRoverState();
+    pkt[2] = st;
     pkt[3] = flags;
-    pkt[4] = Crc8(pkt, 4);
 
+    err_t err = tcp_write(pcb, pkt, sizeof(pkt), TCP_WRITE_FLAG_COPY);
+    if (err == ERR_OK) tcp_output(pcb);
+}
+
+/* TELEM_STATE: [0xAB][0x83][state:u8] = 3 bytes */
+static void SendTelemState(struct tcp_pcb *pcb)
+{
+    uint8_t pkt[3];
+    pkt[0] = TELEM_START;
+    pkt[1] = QUERY_STATE;
+    pkt[2] = (uint8_t)CurrentRoverState();
     err_t err = tcp_write(pcb, pkt, sizeof(pkt), TCP_WRITE_FLAG_COPY);
     if (err == ERR_OK) tcp_output(pcb);
 }
@@ -254,19 +287,14 @@ static void ProcessByte(struct client_conn *c, uint8_t b)
 
     complete: {
         uint8_t type = c->rx_buf[1];
-        if (Crc8(c->rx_buf, (uint8_t)(c->rx_expected - 1U)) !=
-            c->rx_buf[c->rx_expected - 1U]) {
-            /* Bad CRC — discard */
-            c->rx_state = RX_WAIT_START;
-            break;
-        }
         if (type < 0x80U) {
-            DispatchRoverCommand(c->rx_buf);
+            DispatchRoverCommand(c->rx_buf, c->pcb);
         } else {
             switch (type) {
             case QUERY_ALL:      SendTelemAll(c->pcb);      break;
             case QUERY_STEERING: SendTelemSteering(c->pcb); break;
             case QUERY_DRIVE:    SendTelemDrive(c->pcb);    break;
+            case QUERY_STATE:    SendTelemState(c->pcb);    break;
             default:                                        break;
             }
         }
