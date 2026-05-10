@@ -47,7 +47,9 @@ void CameraServoPoll(void) {
       break;
     case ROVER_READY:
       TIM3->CCR1 = CAM_READY_PULSEWIDTH;
-    break;
+      break;
+    default:
+      break;
   }
 }
 

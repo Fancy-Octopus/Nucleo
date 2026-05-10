@@ -30,12 +30,19 @@ typedef enum {
     ROVER_SPIN_LEFT        = 4U,   /* spin-in-place CCW, default speed       */
     ROVER_ARMS_DOWN        = 5U,   /* lower both arms at default arm speed   */
     ROVER_ARMS_UP          = 6U,   /* raise both arms at default arm speed   */
-    ROVER_DIG_FORWARD      = 7U,   /* drums fwd, wheels zero                 */
-    ROVER_DEPOSIT_FORWARD  = 8U,
+    ROVER_DIG_FRONT        = 7U,   /* drums fwd, wheels zero                 */
+    ROVER_DEPOSIT_FRONT    = 8U,
     ROVER_READY            = 9U,   /* deprecated — treated as ROVER_IDLE     */
     ROVER_ESTOP            = 10U,  /* all stop, steering disabled, sticky    */
-    ROVER_DIG_BACKWARD     = 11U,
-    ROVER_DEPOSIT_BACKWARD = 12U,
+    ROVER_DIG_BACK         = 11U,
+    ROVER_DEPOSIT_BACK     = 12U,
+    ROVER_DIG_BOTH         = 13U,
+    ROVER_DEPOSIT_BOTH     = 14U,
+    ROVER_FRONT_ARM_UP     = 15U,
+    ROVER_FRONT_ARM_DOWN   = 16U,
+    ROVER_BACK_ARM_UP      = 17U,
+    ROVER_BACK_ARM_DOWN    = 18U,
+    ROVER_RESET_STEPPERS   = 19U,
 
     /* --- Tier 1 deprecated aliases (old names, same values) --- */
     ROVER_TURN_RIGHT       = 3U,   /* → ROVER_SPIN_RIGHT  */
@@ -44,9 +51,9 @@ typedef enum {
     ROVER_WINCH_UP         = 6U,   /* → ROVER_ARMS_UP     */
 
     /* --- Tier 2 --- */
-    ROVER_DRIVE            = 16U,  /* fwd/bwd at context.drive_speed (ERPM)  */
-    ROVER_SPIN             = 17U,  /* spin-in-place at context.spin_speed    */
-    ROVER_ARM_MOVE         = 18U,  /* RoboClaw at context.arm_speed          */
+    ROVER_DRIVE            = 20U,  /* fwd/bwd at context.drive_speed (ERPM)  */
+    ROVER_SPIN             = 21U,  /* spin-in-place at context.spin_speed    */
+    ROVER_ARM_MOVE         = 22U,  /* RoboClaw at context.arm_speed          */
 
     /* --- Tier 3 --- */
     ROVER_TRAVERSE         = 32U,  /* context.drive_speed + steer angles     */

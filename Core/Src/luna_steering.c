@@ -296,8 +296,6 @@ void SteeringPoll(void)
     case ROVER_FORWARD:        case ROVER_FORWARD_FORCE:
     case ROVER_BACKWARD:       case ROVER_BACKWARD_FORCE:
     case ROVER_DRIVE:          case ROVER_DRIVE_FORCE:
-    case ROVER_DIG_FORWARD:    case ROVER_DIG_BACKWARD:
-    case ROVER_DEPOSIT_FORWARD: case ROVER_DEPOSIT_BACKWARD:
         targetFl = targetFr = targetRl = targetRr = 0.0f;
         break;
 
