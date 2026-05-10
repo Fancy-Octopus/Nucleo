@@ -179,6 +179,26 @@ void RoboclawPoll(void)
         BothArms(ARM_SPEED, 1);
         break;
 
+    case ROVER_FRONT_ARM_UP:
+        ArmMotor1(ARM_SPEED, 0);
+        ArmMotor2(0, 0);
+        break;
+
+    case ROVER_FRONT_ARM_DOWN:
+        ArmMotor1(ARM_SPEED, 1);
+        ArmMotor2(0, 0);
+        break;
+
+    case ROVER_BACK_ARM_UP:
+        ArmMotor1(0, 0);
+        ArmMotor2(ARM_SPEED, 0);
+        break;
+
+    case ROVER_BACK_ARM_DOWN:
+        ArmMotor1(0, 0);
+        ArmMotor2(ARM_SPEED, 1);
+        break;
+
     case ROVER_ARM_MOVE: {
         /* context.arm_speed: positive = up, negative = down, 0 = stop */
         int16_t spd = (int16_t)ctx->arm_speed;

@@ -28,6 +28,9 @@ static uint32_t           lastRefreshTick = 0;
 static float targetFl = 0.0f, targetFr = 0.0f,
              targetRl = 0.0f, targetRr = 0.0f;
 
+/* One-shot guard: prevents re-issuing the reset command each tick */
+static uint8_t resetFired = 0;
+
 /* RX interrupt state machine */
 static volatile uint8_t steeringRxByte;
 static rx_state_t  rxState      = RX_WAIT_START;
@@ -268,7 +271,9 @@ void SteeringPoll(void)
 
     case STEERING_STATE_RESETTING:
     case STEERING_STATE_LINK_LOST:
-        /* Transitions back to IDLE are handled in ProcessStatusPacket */
+        /* Transitions back to IDLE are handled in ProcessStatusPacket.
+         * Clear one-shot flag if state left ROVER_RESET_STEPPERS. */
+        if (roverState != ROVER_RESET_STEPPERS) resetFired = 0;
         break;
 
     default:
@@ -277,6 +282,15 @@ void SteeringPoll(void)
             SendDisableCommand(STEERING_RESET_ALL);
             diag.hstate = STEERING_STATE_DISABLED;
             break;
+        }
+        /* One-shot stepper reset */
+        if (roverState == ROVER_RESET_STEPPERS) {
+            if (!resetFired) {
+                SteeringResetDriver(STEERING_RESET_ALL);  /* sets hstate = RESETTING */
+                resetFired = 1;
+            }
+        } else {
+            resetFired = 0;
         }
         /* MOVING → AT_TARGET once wheels have settled */
         if (diag.link_active && diag.hstate == STEERING_STATE_MOVING) {

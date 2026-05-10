@@ -217,32 +217,46 @@ void VescPoll(void)
         comm_can_set_rpm(VESC_BD, 0.0f);
         break;
 
-    /* ---- Tier 1: dig states — wheels stopped, drums run ---- */
-    case ROVER_DIG_FORWARD:
-    case ROVER_DIG_BACKWARD:
-        comm_can_set_rpm(VESC_FL, 0.0f);
-        comm_can_set_rpm(VESC_FR, 0.0f);
-        comm_can_set_rpm(VESC_BL, 0.0f);
-        comm_can_set_rpm(VESC_BR, 0.0f);
-        comm_can_set_rpm(VESC_FD, VESC_DRUM_SPEED);
-        comm_can_set_rpm(VESC_BD, VESC_DRUM_SPEED);
+    /* ---- Tier 1: dig/deposit — wheels stopped, drums run ---- */
+    case ROVER_DIG_FRONT:
+        comm_can_set_rpm(VESC_FL, 0.0f); comm_can_set_rpm(VESC_FR, 0.0f);
+        comm_can_set_rpm(VESC_BL, 0.0f); comm_can_set_rpm(VESC_BR, 0.0f);
+        comm_can_set_rpm(VESC_FD,  VESC_DRUM_SPEED);
+        comm_can_set_rpm(VESC_BD,  0.0f);
         break;
 
-    case ROVER_DEPOSIT_FORWARD:
-        comm_can_set_rpm(VESC_FL, 0.0f);
-        comm_can_set_rpm(VESC_FR, 0.0f);
-        comm_can_set_rpm(VESC_BL, 0.0f);
-        comm_can_set_rpm(VESC_BR, 0.0f);
+    case ROVER_DIG_BACK:
+        comm_can_set_rpm(VESC_FL, 0.0f); comm_can_set_rpm(VESC_FR, 0.0f);
+        comm_can_set_rpm(VESC_BL, 0.0f); comm_can_set_rpm(VESC_BR, 0.0f);
+        comm_can_set_rpm(VESC_FD,  0.0f);
+        comm_can_set_rpm(VESC_BD,  VESC_DRUM_SPEED);
+        break;
+
+    case ROVER_DIG_BOTH:
+        comm_can_set_rpm(VESC_FL, 0.0f); comm_can_set_rpm(VESC_FR, 0.0f);
+        comm_can_set_rpm(VESC_BL, 0.0f); comm_can_set_rpm(VESC_BR, 0.0f);
+        comm_can_set_rpm(VESC_FD,  VESC_DRUM_SPEED);
+        comm_can_set_rpm(VESC_BD,  VESC_DRUM_SPEED);
+        break;
+
+    case ROVER_DEPOSIT_FRONT:
+        comm_can_set_rpm(VESC_FL, 0.0f); comm_can_set_rpm(VESC_FR, 0.0f);
+        comm_can_set_rpm(VESC_BL, 0.0f); comm_can_set_rpm(VESC_BR, 0.0f);
         comm_can_set_rpm(VESC_FD, -VESC_DRUM_SPEED);
         comm_can_set_rpm(VESC_BD,  0.0f);
         break;
 
-    case ROVER_DEPOSIT_BACKWARD:
-        comm_can_set_rpm(VESC_FL, 0.0f);
-        comm_can_set_rpm(VESC_FR, 0.0f);
-        comm_can_set_rpm(VESC_BL, 0.0f);
-        comm_can_set_rpm(VESC_BR, 0.0f);
+    case ROVER_DEPOSIT_BACK:
+        comm_can_set_rpm(VESC_FL, 0.0f); comm_can_set_rpm(VESC_FR, 0.0f);
+        comm_can_set_rpm(VESC_BL, 0.0f); comm_can_set_rpm(VESC_BR, 0.0f);
         comm_can_set_rpm(VESC_FD,  0.0f);
+        comm_can_set_rpm(VESC_BD, -VESC_DRUM_SPEED);
+        break;
+
+    case ROVER_DEPOSIT_BOTH:
+        comm_can_set_rpm(VESC_FL, 0.0f); comm_can_set_rpm(VESC_FR, 0.0f);
+        comm_can_set_rpm(VESC_BL, 0.0f); comm_can_set_rpm(VESC_BR, 0.0f);
+        comm_can_set_rpm(VESC_FD, -VESC_DRUM_SPEED);
         comm_can_set_rpm(VESC_BD, -VESC_DRUM_SPEED);
         break;
 

@@ -12,8 +12,8 @@
 
 /* ---- Rover states -------------------------------------------------------
  *
- * Tier 1 (0-15):  no context required — fixed default behaviour
- * Tier 2 (16-31): one scalar in rover_context_t
+ * Tier 1 (0-19):  no context required — fixed default behaviour
+ * Tier 2 (20-31): one scalar in rover_context_t
  * Tier 3 (32-47): speed + 4 steering angles in rover_context_t
  * Tier 4 (48-63): per-wheel speed + angle in rover_context_t
  *

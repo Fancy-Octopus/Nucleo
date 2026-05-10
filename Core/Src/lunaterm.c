@@ -191,15 +191,22 @@ void PrintRoverState(EmbeddedCli *cli, char *args, void *context)
     case ROVER_BACKWARD:         name = "BACKWARD";         break;
     case ROVER_SPIN_RIGHT:       name = "SPIN_RIGHT";       break;
     case ROVER_SPIN_LEFT:        name = "SPIN_LEFT";        break;
-    case ROVER_ARMS_DOWN:        name = "ARMS_DOWN";        break;
-    case ROVER_ARMS_UP:          name = "ARMS_UP";          break;
-    case ROVER_DIG_FORWARD:      name = "DIG_FORWARD";      break;
-    case ROVER_DEPOSIT_FORWARD:  name = "DEPOSIT_FORWARD";  break;
-    case ROVER_READY:            name = "READY (->IDLE)";   break;
-    case ROVER_ESTOP:            name = "ESTOP";            break;
-    case ROVER_DIG_BACKWARD:     name = "DIG_BACKWARD";     break;
-    case ROVER_DEPOSIT_BACKWARD: name = "DEPOSIT_BACKWARD"; break;
-    case ROVER_DRIVE:            name = "DRIVE (T2)";       break;
+    case ROVER_ARMS_DOWN:         name = "ARMS_DOWN";         break;
+    case ROVER_ARMS_UP:           name = "ARMS_UP";           break;
+    case ROVER_DIG_FRONT:         name = "DIG_FRONT";         break;
+    case ROVER_DEPOSIT_FRONT:     name = "DEPOSIT_FRONT";     break;
+    case ROVER_READY:             name = "READY (->IDLE)";    break;
+    case ROVER_ESTOP:             name = "ESTOP";             break;
+    case ROVER_DIG_BACK:          name = "DIG_BACK";          break;
+    case ROVER_DEPOSIT_BACK:      name = "DEPOSIT_BACK";      break;
+    case ROVER_DIG_BOTH:          name = "DIG_BOTH";          break;
+    case ROVER_DEPOSIT_BOTH:      name = "DEPOSIT_BOTH";      break;
+    case ROVER_FRONT_ARM_UP:      name = "FRONT_ARM_UP";      break;
+    case ROVER_FRONT_ARM_DOWN:    name = "FRONT_ARM_DOWN";    break;
+    case ROVER_BACK_ARM_UP:       name = "BACK_ARM_UP";       break;
+    case ROVER_BACK_ARM_DOWN:     name = "BACK_ARM_DOWN";     break;
+    case ROVER_RESET_STEPPERS:    name = "RESET_STEPPERS";    break;
+    case ROVER_DRIVE:             name = "DRIVE (T2)";        break;
     case ROVER_SPIN:             name = "SPIN (T2)";        break;
     case ROVER_ARM_MOVE:         name = "ARM_MOVE (T2)";    break;
     case ROVER_TRAVERSE:         name = "TRAVERSE (T3)";    break;
@@ -290,7 +297,7 @@ void SetSpinLeft(EmbeddedCli *cli, char *args, void *context)
 
 void SetDigState(EmbeddedCli *cli, char *args, void *context)
 {
-    RequestRoverState(ROVER_DIG_FORWARD);
+    RequestRoverState(ROVER_DIG_FRONT);
 }
 
 void SetDrive(EmbeddedCli *cli, char *args, void *context)

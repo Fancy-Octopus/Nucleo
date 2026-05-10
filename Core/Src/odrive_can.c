@@ -304,18 +304,21 @@ int OdrivePoll(void){
 				SetCLControl(&odrvbl,1,1);
 
 			break;
-			case ROVER_DIG_FORWARD:
-			case ROVER_DIG_BACKWARD:
-				SetSpeed(&odrvbr,0,DEPOSIT_SPEED);
-				SetCLControl(&odrvbr,0,1);
+			case ROVER_DIG_FRONT:
+			case ROVER_DIG_BOTH:
 				SetSpeed(&odrvfl,0,DEPOSIT_SPEED);
 				SetCLControl(&odrvfl,0,1);
 			break;
-			case ROVER_DEPOSIT_FORWARD:
+			case ROVER_DIG_BACK:
+				SetSpeed(&odrvbr,0,DEPOSIT_SPEED);
+				SetCLControl(&odrvbr,0,1);
+			break;
+			case ROVER_DEPOSIT_FRONT:
 				SetSpeed(&odrvfl,0,-DEPOSIT_SPEED);
 				SetCLControl(&odrvfl,0,1);
 			break;
-			case ROVER_DEPOSIT_BACKWARD:
+			case ROVER_DEPOSIT_BACK:
+			case ROVER_DEPOSIT_BOTH:
 				SetSpeed(&odrvbr,0,-DEPOSIT_SPEED);
 				SetCLControl(&odrvbr,0,1);
 			break;

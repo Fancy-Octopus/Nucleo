@@ -70,8 +70,8 @@ static uint8_t Crc8(const uint8_t *data, uint8_t len)
  * Query types (≥ 0x80) and unknown values: 0 floats (3-byte packet). */
 static uint8_t PayloadFloats(uint8_t type)
 {
-    if (type < 16U) return 0;   /* Tier 1 rover state */
-    if (type < 32U) return 1;   /* Tier 2 rover state */
+    if (type < 20U) return 0;   /* Tier 1 rover state (0-19) */
+    if (type < 32U) return 1;   /* Tier 2 rover state (20-31) */
     if (type < 48U) return 5;   /* Tier 3 rover state */
     if (type < 64U) return 8;   /* Tier 4 rover state */
     if (type < 68U) return 0;   /* Force Tier 1 (64-67): no payload */
@@ -99,7 +99,7 @@ static void DispatchRoverCommand(const uint8_t *buf)
     rover_context_t ctx;
     memset(&ctx, 0, sizeof(ctx));
 
-    if (state_byte >= 16U && state_byte < 32U) {
+    if (state_byte >= 20U && state_byte < 32U) {
         switch ((rover_state_t)state_byte) {
         case ROVER_DRIVE:    ctx.drive_speed = floats[0]; break;
         case ROVER_SPIN:     ctx.spin_speed  = floats[0]; break;
