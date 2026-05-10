@@ -371,4 +371,12 @@ static void remove_client(struct tcp_pcb *pcb)
 /* Stub — no periodic broadcast. Telemetry is request-driven per client. */
 void tcp_task(void) {}
 
+uint8_t GetTcpClientCount(void)
+{
+    uint8_t n = 0;
+    const struct client_conn *c = client_list;
+    while (c != NULL) { n++; c = c->next; }
+    return n;
+}
+
 #endif /* LWIP_TCP */

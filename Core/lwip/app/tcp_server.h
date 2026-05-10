@@ -37,6 +37,8 @@
 #ifndef APP_TCP_TEST_H_
 #define APP_TCP_TEST_H_
 
+#include "main.h"
+
 /* ---- Telemetry query types (sent by client, payload = 0 floats) ---- */
 #define QUERY_ALL       0x80U
 #define QUERY_STEERING  0x81U
@@ -45,7 +47,8 @@
 /* ---- Telemetry response start byte ---- */
 #define TELEM_START     0xABU
 
-void tcp_server_init(void);
-void tcp_task(void);
+void    tcp_server_init(void);
+void    tcp_task(void);
+uint8_t GetTcpClientCount(void);
 
 #endif /* APP_TCP_TEST_H_ */

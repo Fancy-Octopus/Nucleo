@@ -15,6 +15,12 @@
 
 #include "rover_controller.h"
 #include "luna_steering.h"
+#include "lwip.h"
+#include "tcp_server.h"
+#include "lwip/netif.h"
+#include "lwip/ip4_addr.h"
+
+extern struct netif gnetif;
 
 /* ---- Forward declarations ---- */
 void ToggleUserLEDs(EmbeddedCli *cli, char *args, void *context);
@@ -38,6 +44,7 @@ void SetSteerOnly(EmbeddedCli *cli, char *args, void *context);
 void SteerHome(EmbeddedCli *cli, char *args, void *context);
 void AvgLoopTime(EmbeddedCli *cli, char *args, void *context);
 void PrintStepperStats(EmbeddedCli *cli, char *args, void *context);
+void PrintNetStatus(EmbeddedCli *cli, char *args, void *context);
 
 EmbeddedCli *cli;
 
@@ -104,6 +111,9 @@ static CliCommandBinding GetLoopTime = {
 static CliCommandBinding StepperStats = {
     "stats-steps", "Print steering / drive-gate diagnostic counters", 0, NULL, PrintStepperStats
 };
+static CliCommandBinding NetStatusCmd = {
+    "net-status", "Print IP, MAC, DHCP state, and active TCP client count", 0, NULL, PrintNetStatus
+};
 
 /* ---- Init ---- */
 
@@ -134,6 +144,7 @@ void LunaTermInit(void)
     embeddedCliAddBinding(cli, SteerHomeCmd);
     embeddedCliAddBinding(cli, GetLoopTime);
     embeddedCliAddBinding(cli, StepperStats);
+    embeddedCliAddBinding(cli, NetStatusCmd);
 
     printf("\r\n");
 }
@@ -399,4 +410,33 @@ void PrintStepperStats(EmbeddedCli *cli, char *args, void *context)
     } else {
         printf("Actual:   (no data)\r\n");
     }
+}
+
+void PrintNetStatus(EmbeddedCli *cli, char *args, void *context)
+{
+    char buf[16];
+
+    /* ---- Ethernet link / interface ---- */
+    printf("Link:     %s\r\n", netif_is_link_up(&gnetif) ? "UP" : "DOWN");
+    printf("IF:       %s\r\n", netif_is_up(&gnetif)      ? "UP" : "DOWN");
+
+    /* ---- MAC address ---- */
+    const uint8_t *m = gnetif.hwaddr;
+    printf("MAC:      %02X:%02X:%02X:%02X:%02X:%02X\r\n",
+           m[0], m[1], m[2], m[3], m[4], m[5]);
+
+    /* ---- IP / netmask / gateway ---- */
+    ip4addr_ntoa_r(netif_ip4_addr(&gnetif),    buf, sizeof(buf));
+    printf("IP:       %s\r\n", buf);
+    ip4addr_ntoa_r(netif_ip4_netmask(&gnetif), buf, sizeof(buf));
+    printf("Netmask:  %s\r\n", buf);
+    ip4addr_ntoa_r(netif_ip4_gw(&gnetif),      buf, sizeof(buf));
+    printf("Gateway:  %s\r\n", buf);
+
+    /* ---- DHCP ---- */
+    printf("DHCP:     %s  (tries: %u)\r\n",
+           DhcpStateName(), (unsigned)GetDhcpTries());
+
+    /* ---- TCP clients ---- */
+    printf("Clients:  %u active\r\n", (unsigned)GetTcpClientCount());
 }

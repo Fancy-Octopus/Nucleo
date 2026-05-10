@@ -143,6 +143,26 @@ void DHCP_Process(struct netif *netif)
   }
 }
 
+const char *DhcpStateName(void)
+{
+    switch (DHCP_state) {
+    case DHCP_OFF:              return "OFF";
+    case DHCP_START:            return "START";
+    case DHCP_WAIT_ADDRESS:     return "WAIT_ADDRESS";
+    case DHCP_ADDRESS_ASSIGNED: return "ASSIGNED";
+    case DHCP_TIMEOUT:          return "TIMEOUT (static fallback)";
+    case DHCP_LINK_DOWN:        return "LINK_DOWN";
+    default:                    return "?";
+    }
+}
+
+uint8_t GetDhcpTries(void)
+{
+    struct dhcp *d = (struct dhcp *)netif_get_client_data(
+                         &gnetif, LWIP_NETIF_CLIENT_DATA_INDEX_DHCP);
+    return (d != NULL) ? d->tries : 0U;
+}
+
 /**
   * @brief  DHCP periodic check
   *   netif
