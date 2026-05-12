@@ -182,23 +182,23 @@ void RoboclawPoll(void)
         break;
 
     case ROVER_FRONT_ARM_UP:
-        ArmMotor1(ARM_SPEED, 1);
-        ArmMotor2(0, 0);
+        ArmMotor2(ARM_SPEED, 1);
+        ArmMotor1(0, 0);
         break;
 
     case ROVER_FRONT_ARM_DOWN:
-        ArmMotor1(ARM_SPEED, 0);
-        ArmMotor2(0, 0);
+        ArmMotor2(ARM_SPEED, 0);
+        ArmMotor1(0, 0);
         break;
 
     case ROVER_BACK_ARM_UP:
-        ArmMotor1(0, 0);
-        ArmMotor2(ARM_SPEED, 1);
+        ArmMotor2(0, 0);
+        ArmMotor1(ARM_SPEED, 1);
         break;
 
     case ROVER_BACK_ARM_DOWN:
-        ArmMotor1(0, 0);
-        ArmMotor2(ARM_SPEED, 0);
+        ArmMotor2(0, 0);
+        ArmMotor1(ARM_SPEED, 0);
         break;
 
     case ROVER_ARM_MOVE: {
@@ -217,8 +217,14 @@ void RoboclawPoll(void)
 
     case ROVER_READY:
       BothCameras(ARM_SPEED, 0);
+      BothArms(0, 0);
       break;
     }
+
+    case ROVER_UNREADY:
+      BothCameras(ARM_SPEED, 1);
+      BothArms(0, 0);
+      break;
 
     default:
         BothArms(0, 0);
@@ -274,7 +280,7 @@ static void ArmMotor2(uint8_t speed, uint8_t dir)
 {
     uint8_t data = speed;
     RoboclawSendMessage(ROBOCLAW_ADDRESS,
-                        dir ? M2BACKWARD : M2FORWARD,
+                        dir ? M2FORWARD : M2BACKWARD,
                         &data, sizeof(data));
 }
 

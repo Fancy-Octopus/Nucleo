@@ -314,23 +314,10 @@ void SteeringPoll(void)
         break;
 
     case ROVER_SPIN_RIGHT:     case ROVER_SPIN_RIGHT_FORCE:
+    case ROVER_SPIN_LEFT:      case ROVER_SPIN_LEFT_FORCE:
+    case ROVER_SPIN:           case ROVER_SPIN_FORCE:
         targetFl =  STEERING_SPIN_FL;  targetFr =  STEERING_SPIN_FR;
         targetRl =  STEERING_SPIN_RL;  targetRr =  STEERING_SPIN_RR;
-        break;
-
-    case ROVER_SPIN_LEFT:      case ROVER_SPIN_LEFT_FORCE:
-        targetFl = -STEERING_SPIN_FL;  targetFr = -STEERING_SPIN_FR;
-        targetRl = -STEERING_SPIN_RL;  targetRr = -STEERING_SPIN_RR;
-        break;
-
-    case ROVER_SPIN:           case ROVER_SPIN_FORCE:
-        if (ctx->spin_speed >= 0.0f) {
-            targetFl =  STEERING_SPIN_FL;  targetFr =  STEERING_SPIN_FR;
-            targetRl =  STEERING_SPIN_RL;  targetRr =  STEERING_SPIN_RR;
-        } else {
-            targetFl = -STEERING_SPIN_FL;  targetFr = -STEERING_SPIN_FR;
-            targetRl = -STEERING_SPIN_RL;  targetRr = -STEERING_SPIN_RR;
-        }
         break;
 
     case ROVER_TRAVERSE:       case ROVER_TRAVERSE_FORCE:

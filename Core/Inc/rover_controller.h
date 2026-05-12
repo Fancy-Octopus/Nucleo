@@ -43,6 +43,7 @@ typedef enum {
     ROVER_BACK_ARM_UP      = 17U,
     ROVER_BACK_ARM_DOWN    = 18U,
     ROVER_RESET_STEPPERS   = 19U,
+    ROVER_UNREADY          = 25U,
 
     /* --- Tier 1 deprecated aliases (old names, same values) --- */
     ROVER_TURN_RIGHT       = 3U,   /* → ROVER_SPIN_RIGHT  */

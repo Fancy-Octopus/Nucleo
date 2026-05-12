@@ -56,10 +56,10 @@
 /* ---- Angle constants (degrees) ---- */
 #define STEERING_ANGLE_STRAIGHT   0.0f
 
-#define STEERING_SPIN_FL          45.0f
-#define STEERING_SPIN_FR         -45.0f
-#define STEERING_SPIN_RL         -45.0f
-#define STEERING_SPIN_RR          45.0f
+#define STEERING_SPIN_FL          51.4f
+#define STEERING_SPIN_FR         -51.4f
+#define STEERING_SPIN_RL         -51.4f
+#define STEERING_SPIN_RR          51.4f
 
 /* ---- Steering sub-state (H5 side) ---- */
 typedef enum {

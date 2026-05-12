@@ -19,8 +19,8 @@
 #define VESC_FR (uint8_t) 13   /* Front-Right corner wheel */
 #define VESC_BL (uint8_t) 10   /* Back-Left   corner wheel */
 #define VESC_BR (uint8_t) 11   /* Back-Right  corner wheel */
-#define VESC_FD (uint8_t) 6    /* Front dig drum           */
-#define VESC_BD (uint8_t) 5    /* Back  dig drum           */
+#define VESC_FD (uint8_t) 5    /* Front dig drum           */
+#define VESC_BD (uint8_t) 6    /* Back  dig drum           */
 
 #define VESC_WHEEL_SPEED 5000.0f   /* default ERPM for Tier 1 wheel states  */
 #define VESC_DRUM_SPEED  8000.0f   /* default ERPM for dig/deposit states   */
