@@ -21,6 +21,7 @@
 #define ARM_SPEED        127
 
 #define ROBOCLAW_ADDRESS 0x80
+#define CAMERACLAW_ADDRESS 0x82
 
 /* RoboClaw packet command IDs */
 enum {
@@ -125,6 +126,7 @@ static void BothArms(uint8_t speed, uint8_t dir);
 static void RoboclawCrcUpdate(uint8_t data, uint16_t *crc);
 static void RoboclawSendMessage(uint8_t addr, uint8_t command,
                                 uint8_t *data, uint8_t datalen);
+static void BothCameras(uint8_t speed, uint8_t dir);
 
 /* ---- Globals ---- */
 UART_HandleTypeDef roboclawUart;
@@ -172,31 +174,31 @@ void RoboclawPoll(void)
 
     switch (state) {
     case ROVER_ARMS_UP:
-        BothArms(ARM_SPEED, 0);
-        break;
-
-    case ROVER_ARMS_DOWN:
         BothArms(ARM_SPEED, 1);
         break;
 
+    case ROVER_ARMS_DOWN:
+        BothArms(ARM_SPEED, 0);
+        break;
+
     case ROVER_FRONT_ARM_UP:
-        ArmMotor1(ARM_SPEED, 0);
+        ArmMotor1(ARM_SPEED, 1);
         ArmMotor2(0, 0);
         break;
 
     case ROVER_FRONT_ARM_DOWN:
-        ArmMotor1(ARM_SPEED, 1);
+        ArmMotor1(ARM_SPEED, 0);
         ArmMotor2(0, 0);
         break;
 
     case ROVER_BACK_ARM_UP:
         ArmMotor1(0, 0);
-        ArmMotor2(ARM_SPEED, 0);
+        ArmMotor2(ARM_SPEED, 1);
         break;
 
     case ROVER_BACK_ARM_DOWN:
         ArmMotor1(0, 0);
-        ArmMotor2(ARM_SPEED, 1);
+        ArmMotor2(ARM_SPEED, 0);
         break;
 
     case ROVER_ARM_MOVE: {
@@ -205,13 +207,17 @@ void RoboclawPoll(void)
         if (spd > 127)  spd =  127;
         if (spd < -127) spd = -127;
         if (spd > 0) {
-            BothArms((uint8_t)spd, 0);
+            BothArms((uint8_t)spd, 1);
         } else if (spd < 0) {
-            BothArms((uint8_t)(-spd), 1);
+            BothArms((uint8_t)(-spd), 0);
         } else {
             BothArms(0, 0);
         }
         break;
+
+    case ROVER_READY:
+      BothCameras(ARM_SPEED, 0);
+      break;
     }
 
     default:
@@ -276,4 +282,15 @@ static void BothArms(uint8_t speed, uint8_t dir)
 {
     ArmMotor1(speed, dir);
     ArmMotor2(speed, dir);
+}
+
+static void BothCameras(uint8_t speed, uint8_t dir)
+{
+  uint8_t data = speed;
+  RoboclawSendMessage(CAMERACLAW_ADDRESS,
+                      dir ? M1BACKWARD : M1FORWARD,
+                      &data, sizeof(data));
+  RoboclawSendMessage(CAMERACLAW_ADDRESS,
+                      dir ? M2BACKWARD : M2FORWARD,
+                      &data, sizeof(data));
 }
