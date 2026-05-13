@@ -95,7 +95,7 @@ static uint8_t IsKnownRoverState(uint8_t b)
     if (b == 32U || b == 33U) return 1U;   /* Tier 3: TRAVERSE, STEER_ONLY    */
     if (b == 48U) return 1U;               /* Tier 4: WHEEL_CONTROL            */
     if (b >= 64U && b <= 71U) return 1U;   /* Force variants                   */
-    if (b == 25) return 1U;
+    if (b == 72) return 1U;
     return 0U;
 }
 
