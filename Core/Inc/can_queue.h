@@ -12,6 +12,15 @@
 #include "stm32h5xx_hal.h"
 #include "luna_wait.h"  // schedule_t, ScheduleReady, ResetSchedule, SetScheduledTime
 
+
+/* ==========================================================================
+ * Disable/Enable CAN Transmit
+ * ==========================================================================
+ *    Comment out the block of code for regular operation, and uncomment the
+ *    define to have the CANBUS transmit temporarily disabled.
+ */
+//#define CANBUS_TRANSMIT_DISABLE
+
 /* ==========================================================================
  * Build configuration
  * ==========================================================================

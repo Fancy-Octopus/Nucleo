@@ -334,7 +334,9 @@ void CAN_ClearErrorStats(void)
  * ========================================================================== */
 void can_transmit_eid(FDCAN_HandleTypeDef *hfdcan, uint32_t id, const uint8_t *data, uint8_t len)
 {
+#ifndef CANBUS_TRANSMIT_DISABLE
     CanQueue_Enqueue(hfdcan, id, data, len);
+#endif
 }
 
 /* ==========================================================================

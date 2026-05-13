@@ -23,7 +23,7 @@
 #define VESC_BD (uint8_t) 6    /* Back  dig drum           */
 
 #define VESC_WHEEL_SPEED 5000.0f   /* default ERPM for Tier 1 wheel states  */
-#define VESC_DRUM_SPEED  8000.0f   /* default ERPM for dig/deposit states   */
+#define VESC_DRUM_SPEED  15000.0f   /* default ERPM for dig/deposit states   */
 #define VESC_POLL_TIME   100        /* ms — control loop rate                */
 
 /* --------------------------------------------------------------------------
