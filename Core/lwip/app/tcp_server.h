@@ -29,7 +29,9 @@
  *   Query responses mirror the query type byte that triggered them.
  *   ACK_CMD is sent automatically after every rover command packet.
  *
- *   TELEM_ALL      0x80  [state:u8][flags:u8][FL:f32][FR:f32][RL:f32][RR:f32][hstate:u8]  21 bytes
+ *   TELEM_ALL      0x80  [state:u8][flags:u8][FL:f32][FR:f32][RL:f32][RR:f32][hstate:u8]  69 bytes
+ *                        + [rpm:i32le][current:f32le] × 6 VESCs
+ *                        VESC order: FD(5) BD(6) BL(10) BR(11) FL(12) FR(13)
  *   TELEM_STEERING 0x81  [FL:f32][FR:f32][RL:f32][RR:f32][steer_flags:u8][hstate:u8]      20 bytes
  *   TELEM_DRIVE    0x82  [state:u8][flags:u8]                                               4 bytes
  *   TELEM_STATE    0x83  [state:u8]                                                         3 bytes

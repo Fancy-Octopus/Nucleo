@@ -168,7 +168,8 @@ static void DispatchRoverCommand(const uint8_t *buf, struct tcp_pcb *pcb)
 
 /* ---- Telemetry builders ---- */
 
-/* TELEM_ALL: [0xAB][0x80][state][flags][FL][FR][RL][RR][hstate] = 21 bytes
+/* TELEM_ALL: [0xAB][0x80][state][flags][FL][FR][RL][RR][hstate] = 69 bytes
+ *            + [rpm:i32le][current:f32le] x6 VESCs (FD BD BL BR FL FR)
  * flags: bit0=wheels_ready  bit1=force_state  bit2=link_active */
 static void SendTelemAll(struct tcp_pcb *pcb)
 {
@@ -181,7 +182,11 @@ static void SendTelemAll(struct tcp_pcb *pcb)
     if (st >= 64U && st < 72U)                     flags |= 0x02U;
     if (d.link_active)                             flags |= 0x04U;
 
-    uint8_t pkt[21];
+    vesc_status1_t vs[VESC_COUNT];
+    VescGetStatus1All(vs);
+
+    /* 21-byte steering header + 6 x 8-byte VESC entries */
+    uint8_t pkt[21 + VESC_COUNT * 8U];
     pkt[0]  = TELEM_START;
     pkt[1]  = QUERY_ALL;
     pkt[2]  = st;
@@ -191,6 +196,13 @@ static void SendTelemAll(struct tcp_pcb *pcb)
     memcpy(&pkt[12], &s.rl, 4);
     memcpy(&pkt[16], &s.rr, 4);
     pkt[20] = (uint8_t)d.hstate;
+
+    uint8_t *p = &pkt[21];
+    for (uint8_t i = 0; i < VESC_COUNT; i++)
+    {
+        memcpy(p, &vs[i].rpm,     4); p += 4;
+        memcpy(p, &vs[i].current, 4); p += 4;
+    }
 
     err_t err = tcp_write(pcb, pkt, sizeof(pkt), TCP_WRITE_FLAG_COPY);
     if (err == ERR_OK) tcp_output(pcb);
