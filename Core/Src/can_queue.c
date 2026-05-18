@@ -11,6 +11,7 @@
  * Module state
  * ========================================================================== */
 static CanQueue_t            canQueue;
+static CanRxQueue_t          canRxQueue;
 static volatile uint8_t      txInProgress      = 0;
 static FDCAN_HandleTypeDef  *registeredHandle   = NULL;
 
@@ -84,6 +85,8 @@ void CAN_HardwareInit(FDCAN_HandleTypeDef *hfdcan, IRQn_Type it0IrqN, uint32_t i
 
     HAL_FDCAN_ActivateNotification(hfdcan, FDCAN_IT_TX_FIFO_EMPTY, 0);
 
+    HAL_FDCAN_ActivateNotification(hfdcan, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0);
+
     HAL_FDCAN_ActivateNotification(hfdcan,
         FDCAN_IT_BUS_OFF            |
         FDCAN_IT_ERROR_PASSIVE      |
@@ -119,6 +122,30 @@ void HAL_FDCAN_TxFifoEmptyCallback(FDCAN_HandleTypeDef *hfdcan)
     CanQueue_TxNext();
 }
 
+/* Fired by HAL when a new message arrives in RX FIFO 0 */
+void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
+{
+    if(!(RxFifo0ITs & FDCAN_IT_RX_FIFO0_NEW_MESSAGE)) return;
+
+    FDCAN_RxHeaderTypeDef rxHeader;
+    uint8_t rxData[CAN_MAX_DATA_BYTES];
+
+    while(HAL_FDCAN_GetRxFifoFillLevel(hfdcan, FDCAN_RX_FIFO0) > 0)
+    {
+        if(HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO0, &rxHeader, rxData) != HAL_OK) break;
+
+        CanRxMessage_t msg;
+        msg.hfdcan = hfdcan;
+        msg.id     = rxHeader.Identifier;
+        msg.idType = (uint8_t)rxHeader.IdType;
+        msg.len    = (uint8_t)(rxHeader.DataLength >> 16);
+        if(msg.len > CAN_MAX_DATA_BYTES) msg.len = CAN_MAX_DATA_BYTES;
+        for(uint8_t i = 0; i < msg.len; i++) msg.data[i] = rxData[i];
+
+        CAN_RxMessageCallback(&msg);
+    }
+}
+
 /* Fired by HAL on any error status change */
 void HAL_FDCAN_ErrorStatusCallback(FDCAN_HandleTypeDef *hfdcan, uint32_t ErrorStatusITs)
 {
@@ -151,6 +178,9 @@ void CanQueue_Init(void)
     canQueue.head         = 0;
     canQueue.tail         = 0;
     canQueue.count        = 0;
+    canRxQueue.head       = 0;
+    canRxQueue.tail       = 0;
+    canRxQueue.count      = 0;
     txInProgress          = 0;
     recoveryPending       = 0;
     recoveryScheduleReady = 0;
@@ -228,12 +258,37 @@ uint8_t CanQueue_IsBusy(void)
 }
 
 /* Safe to call in both interrupt and polling modes. In polling mode this is
- * the sole mechanism that drains the queue. In interrupt mode it acts as a
- * safety drain in case the TX FIFO empty callback is missed. */
+ * the sole mechanism that drains both queues. In interrupt mode it acts as a
+ * safety drain in case FIFO callbacks are missed. */
 void CanQueue_Poll(void)
 {
     if(errorStats.busState == CAN_BUS_OFF) return;
-    if(canQueue.count == 0)                return;
+
+    /* Drain RX FIFO into the RX queue.
+     * In interrupt mode this is a safety catch; in polling mode it is the
+     * only path that reads received messages. */
+    if(registeredHandle != NULL)
+    {
+        FDCAN_RxHeaderTypeDef rxHeader;
+        uint8_t rxData[CAN_MAX_DATA_BYTES];
+
+        while(HAL_FDCAN_GetRxFifoFillLevel(registeredHandle, FDCAN_RX_FIFO0) > 0)
+        {
+            if(HAL_FDCAN_GetRxMessage(registeredHandle, FDCAN_RX_FIFO0, &rxHeader, rxData) != HAL_OK) break;
+
+            CanRxMessage_t msg;
+            msg.hfdcan = registeredHandle;
+            msg.id     = rxHeader.Identifier;
+            msg.idType = (uint8_t)rxHeader.IdType;
+            msg.len    = (uint8_t)(rxHeader.DataLength >> 16);
+            if(msg.len > CAN_MAX_DATA_BYTES) msg.len = CAN_MAX_DATA_BYTES;
+            for(uint8_t i = 0; i < msg.len; i++) msg.data[i] = rxData[i];
+
+            CAN_RxMessageCallback(&msg);
+        }
+    }
+
+    if(canQueue.count == 0) return;
 
     /* In polling mode also sample error counters here since there is no ISR */
 #if !CAN_USE_INTERRUPTS
@@ -337,6 +392,37 @@ void can_transmit_eid(FDCAN_HandleTypeDef *hfdcan, uint32_t id, const uint8_t *d
 #ifndef CANBUS_TRANSMIT_DISABLE
     CanQueue_Enqueue(hfdcan, id, data, len);
 #endif
+}
+
+/* ==========================================================================
+ * RX queue public API
+ * ========================================================================== */
+uint8_t CanRx_Available(void)
+{
+    return canRxQueue.count;
+}
+
+uint8_t CanRx_Dequeue(CanRxMessage_t *out)
+{
+    if(out == NULL)            return 0;
+    if(canRxQueue.count == 0)  return 0;
+
+    *out = canRxQueue.buffer[canRxQueue.head];
+    canRxQueue.head = (canRxQueue.head + 1) % CAN_RX_QUEUE_MAX_MESSAGES;
+    canRxQueue.count--;
+    return 1;
+}
+
+/* Default: push every received frame into the RX queue.
+ * Override this function anywhere in the project to dispatch by ID
+ * directly without using the intermediate queue. */
+__weak void CAN_RxMessageCallback(CanRxMessage_t *msg)
+{
+    if(canRxQueue.count >= CAN_RX_QUEUE_MAX_MESSAGES) return;
+
+    canRxQueue.buffer[canRxQueue.tail] = *msg;
+    canRxQueue.tail  = (canRxQueue.tail + 1) % CAN_RX_QUEUE_MAX_MESSAGES;
+    canRxQueue.count++;
 }
 
 /* ==========================================================================

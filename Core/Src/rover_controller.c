@@ -20,6 +20,10 @@ static rover_context_t  roverCtx;
 /* ESTOP is sticky — only ROVER_IDLE can exit it */
 static uint8_t          estopActive = 0;
 
+/* PROGRAM_VESCS is sticky — only ROVER_IDLE can exit it.
+ * Does not affect steering; VESC output is silenced in VescPoll. */
+static uint8_t          programVescsActive = 0;
+
 rover_t rover;
 
 IWDG_HandleTypeDef hiwdg;
@@ -43,10 +47,19 @@ rover_state_t RequestRoverStateCtx(rover_state_t reqState,
     if (estopActive && reqState != ROVER_IDLE && reqState != ROVER_ESTOP)
         return roverState;
 
+    /* PROGRAM_VESCS is only exitable by an explicit IDLE request */
+    if (programVescsActive && reqState != ROVER_IDLE && reqState != ROVER_PROGRAM_VESCS)
+        return roverState;
+
     if (reqState == ROVER_ESTOP)
         estopActive = 1;
+    else if (reqState == ROVER_PROGRAM_VESCS)
+        programVescsActive = 1;
     else if (reqState == ROVER_IDLE || reqState == ROVER_READY)
-        estopActive = 0;
+    {
+        estopActive        = 0;
+        programVescsActive = 0;
+    }
 
     roverState = reqState;
     if (ctx) roverCtx = *ctx;

@@ -15,6 +15,7 @@
 
 #include "rover_controller.h"
 #include "luna_steering.h"
+#include "vesc_can.h"
 #include "lwip.h"
 #include "tcp_server.h"
 #include "lwip/netif.h"
@@ -45,6 +46,8 @@ void SteerHome(EmbeddedCli *cli, char *args, void *context);
 void AvgLoopTime(EmbeddedCli *cli, char *args, void *context);
 void PrintStepperStats(EmbeddedCli *cli, char *args, void *context);
 void PrintNetStatus(EmbeddedCli *cli, char *args, void *context);
+void PrintVescStatus(EmbeddedCli *cli, char *args, void *context);
+void SetProgVescs(EmbeddedCli *cli, char *args, void *context);
 
 EmbeddedCli *cli;
 
@@ -114,6 +117,12 @@ static CliCommandBinding StepperStats = {
 static CliCommandBinding NetStatusCmd = {
     "net-status", "Print IP, MAC, DHCP state, and active TCP client count", 0, NULL, PrintNetStatus
 };
+static CliCommandBinding VescStatusCmd = {
+    "vesc-status", "Print RPM, current, and duty for all 6 VESCs", 0, NULL, PrintVescStatus
+};
+static CliCommandBinding ProgVescsCmd = {
+    "prog-vescs", "Enter PROGRAM_VESCS (suppresses VESC output, sticky — set-idle to exit)", 0, NULL, SetProgVescs
+};
 
 /* ---- Init ---- */
 
@@ -145,6 +154,8 @@ void LunaTermInit(void)
     embeddedCliAddBinding(cli, GetLoopTime);
     embeddedCliAddBinding(cli, StepperStats);
     embeddedCliAddBinding(cli, NetStatusCmd);
+    embeddedCliAddBinding(cli, VescStatusCmd);
+    embeddedCliAddBinding(cli, ProgVescsCmd);
 
     printf("\r\n");
 }
@@ -231,6 +242,7 @@ void PrintRoverState(EmbeddedCli *cli, char *args, void *context)
     case ROVER_SPIN_FORCE:          name = "SPIN_FORCE (T2)";          break;
     case ROVER_TRAVERSE_FORCE:      name = "TRAVERSE_FORCE (T3)";      break;
     case ROVER_WHEEL_CONTROL_FORCE: name = "WHEEL_CONTROL_FORCE (T4)"; break;
+    case ROVER_PROGRAM_VESCS:       name = "PROGRAM_VESCS";            break;
     default:                        name = "UNKNOWN";                  break;
     }
     steering_diag_t d = GetSteeringDiag();
@@ -439,4 +451,29 @@ void PrintNetStatus(EmbeddedCli *cli, char *args, void *context)
 
     /* ---- TCP clients ---- */
     printf("Clients:  %u active\r\n", (unsigned)GetTcpClientCount());
+}
+
+void SetProgVescs(EmbeddedCli *cli, char *args, void *context)
+{
+    RequestRoverState(ROVER_PROGRAM_VESCS);
+    printf("PROGRAM_VESCS active — VESC output suppressed. Use set-idle to exit.\r\n");
+}
+
+void PrintVescStatus(EmbeddedCli *cli, char *args, void *context)
+{
+    static const char *const labels[VESC_COUNT] = { "FD", "BD", "BL", "BR", "FL", "FR" };
+    vesc_status1_t s[VESC_COUNT];
+    VescGetStatus1All(s);
+
+    printf("VESC  ID   CONN   RPM        Current    Duty\r\n");
+    for (uint8_t i = 0; i < VESC_COUNT; i++)
+    {
+        printf("%-4s  %-3u  %-5s  %-10ld  %+7.2f A  %+6.3f\r\n",
+               labels[i],
+               (unsigned)s[i].node_id,
+               s[i].connected ? "YES" : "NO",
+               (long)s[i].rpm,
+               (double)s[i].current,
+               (double)s[i].duty);
+    }
 }

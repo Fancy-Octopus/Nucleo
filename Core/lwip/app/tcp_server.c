@@ -17,6 +17,7 @@
 #include "lwip/stats.h"
 #include "rover_controller.h"
 #include "luna_steering.h"
+#include "vesc_can.h"
 #include "main.h"
 #include <string.h>
 
@@ -95,7 +96,7 @@ static uint8_t IsKnownRoverState(uint8_t b)
     if (b == 32U || b == 33U) return 1U;   /* Tier 3: TRAVERSE, STEER_ONLY    */
     if (b == 48U) return 1U;               /* Tier 4: WHEEL_CONTROL            */
     if (b >= 64U && b <= 71U) return 1U;   /* Force variants                   */
-    if (b == 72) return 1U;
+    if (b == 72U || b == 73U) return 1U;  /* ROVER_UNREADY, ROVER_PROGRAM_VESCS */
     return 0U;
 }
 
@@ -254,6 +255,31 @@ static void SendTelemState(struct tcp_pcb *pcb)
     if (err == ERR_OK) tcp_output(pcb);
 }
 
+/* TELEM_VESC: [0xAB][0x85] + 6×[connected:u8][rpm:i32le][current:f32le][duty:f32le] = 80 bytes
+ * Fixed VESC order: FD(5) BD(6) BL(10) BR(11) FL(12) FR(13). */
+static void SendTelemVesc(struct tcp_pcb *pcb)
+{
+    vesc_status1_t s[VESC_COUNT];
+    VescGetStatus1All(s);
+
+    /* 2-byte header + 6 × 13-byte entry */
+    uint8_t pkt[2 + VESC_COUNT * 13U];
+    pkt[0] = TELEM_START;
+    pkt[1] = QUERY_VESC;
+
+    uint8_t *p = &pkt[2];
+    for (uint8_t i = 0; i < VESC_COUNT; i++)
+    {
+        *p++ = s[i].connected;
+        memcpy(p, &s[i].rpm,     4); p += 4;
+        memcpy(p, &s[i].current, 4); p += 4;
+        memcpy(p, &s[i].duty,    4); p += 4;
+    }
+
+    err_t err = tcp_write(pcb, pkt, sizeof(pkt), TCP_WRITE_FLAG_COPY);
+    if (err == ERR_OK) tcp_output(pcb);
+}
+
 /* ---- Per-byte reassembly ---- */
 static void ProcessByte(struct client_conn *c, uint8_t b)
 {
@@ -296,6 +322,7 @@ static void ProcessByte(struct client_conn *c, uint8_t b)
             case QUERY_STEERING: SendTelemSteering(c->pcb); break;
             case QUERY_DRIVE:    SendTelemDrive(c->pcb);    break;
             case QUERY_STATE:    SendTelemState(c->pcb);    break;
+            case QUERY_VESC:     SendTelemVesc(c->pcb);     break;
             default:                                        break;
             }
         }

@@ -27,26 +27,17 @@
 #define VESC_POLL_TIME   100        /* ms — control loop rate                */
 
 /* --------------------------------------------------------------------------
- * VESC CAN packet types
+ * VESC node ID table — must match VESC_COUNT in the header.
+ * Index 0 = FD, 1 = BD, 2 = BL, 3 = BR, 4 = FL, 5 = FR.
  * -------------------------------------------------------------------------- */
-typedef enum {
-    CAN_PACKET_SET_DUTY                  = 0,
-    CAN_PACKET_SET_CURRENT               = 1,
-    CAN_PACKET_SET_CURRENT_BRAKE         = 2,
-    CAN_PACKET_SET_RPM                   = 3,
-    CAN_PACKET_SET_POS                   = 4,
-    CAN_PACKET_SET_CURRENT_REL           = 10,
-    CAN_PACKET_SET_CURRENT_BRAKE_REL     = 11,
-    CAN_PACKET_SET_CURRENT_HANDBRAKE     = 12,
-    CAN_PACKET_SET_CURRENT_HANDBRAKE_REL = 13,
-    CAN_PACKET_MAKE_ENUM_32_BITS         = 0xFFFFFFFF,
-} CAN_PACKET_ID;
+static const uint8_t kVescNodeIds[VESC_COUNT] = { 5, 6, 10, 11, 12, 13 };
 
 /* --------------------------------------------------------------------------
  * Module state
  * -------------------------------------------------------------------------- */
 static FDCAN_HandleTypeDef *vescCanHandle = NULL;
 static schedule_t           canbus_schedule;
+static vesc_t               vescData[VESC_COUNT];
 
 /* --------------------------------------------------------------------------
  * Buffer helpers (private)
@@ -73,6 +64,177 @@ static void buffer_append_float16(uint8_t *buffer, float number, float scale, in
 static void buffer_append_float32(uint8_t *buffer, float number, float scale, int32_t *index)
 {
     buffer_append_int32(buffer, (int32_t)(number * scale), index);
+}
+
+/* --------------------------------------------------------------------------
+ * Buffer helpers — decode (big-endian reads matching VESC firmware)
+ * -------------------------------------------------------------------------- */
+static int16_t buffer_get_int16(const uint8_t *buffer, int32_t *index)
+{
+    int16_t v = (int16_t)((uint16_t)buffer[*index    ] << 8 |
+                           (uint16_t)buffer[*index + 1]);
+    *index += 2;
+    return v;
+}
+
+__attribute__((unused))
+static uint16_t buffer_get_uint16(const uint8_t *buffer, int32_t *index)
+{
+    uint16_t v = (uint16_t)((uint16_t)buffer[*index    ] << 8 |
+                              (uint16_t)buffer[*index + 1]);
+    *index += 2;
+    return v;
+}
+
+static int32_t buffer_get_int32(const uint8_t *buffer, int32_t *index)
+{
+    int32_t v = (int32_t)((uint32_t)buffer[*index    ] << 24 |
+                           (uint32_t)buffer[*index + 1] << 16 |
+                           (uint32_t)buffer[*index + 2] <<  8 |
+                           (uint32_t)buffer[*index + 3]);
+    *index += 4;
+    return v;
+}
+
+static uint32_t buffer_get_uint32(const uint8_t *buffer, int32_t *index)
+{
+    uint32_t v = ((uint32_t)buffer[*index    ] << 24 |
+                  (uint32_t)buffer[*index + 1] << 16 |
+                  (uint32_t)buffer[*index + 2] <<  8 |
+                  (uint32_t)buffer[*index + 3]);
+    *index += 4;
+    return v;
+}
+
+/* --------------------------------------------------------------------------
+ * RX helpers
+ * -------------------------------------------------------------------------- */
+
+/* Returns pointer into vescData for the given node_id, or NULL if unknown. */
+static vesc_t *vesc_node_lookup(uint8_t node_id)
+{
+    for (uint8_t i = 0; i < VESC_COUNT; i++)
+    {
+        if (vescData[i].node_id == node_id)
+            return &vescData[i];
+    }
+    return NULL;
+}
+
+static void decode_status1(vesc_t *v, const uint8_t *d)
+{
+    int32_t idx = 0;
+    v->rpm     = buffer_get_int32(d, &idx);
+    v->current = (float)buffer_get_int16(d, &idx) / 10.0f;
+    v->duty    = (float)buffer_get_int16(d, &idx) / 1000.0f;
+}
+
+static void decode_status2(vesc_t *v, const uint8_t *d)
+{
+    int32_t idx = 0;
+    v->amp_hours         = (float)buffer_get_uint32(d, &idx) / 10000.0f;
+    v->amp_hours_charged = (float)buffer_get_uint32(d, &idx) / 10000.0f;
+}
+
+static void decode_status3(vesc_t *v, const uint8_t *d)
+{
+    int32_t idx = 0;
+    v->watt_hours         = (float)buffer_get_uint32(d, &idx) / 10000.0f;
+    v->watt_hours_charged = (float)buffer_get_uint32(d, &idx) / 10000.0f;
+}
+
+static void decode_status4(vesc_t *v, const uint8_t *d)
+{
+    int32_t idx = 0;
+    v->temp_fet   = (float)buffer_get_int16(d, &idx) / 10.0f;
+    v->temp_motor = (float)buffer_get_int16(d, &idx) / 10.0f;
+    v->current_in = (float)buffer_get_int16(d, &idx) / 10.0f;
+    v->pid_pos    = (float)buffer_get_int16(d, &idx) / 50.0f;
+}
+
+static void decode_status5(vesc_t *v, const uint8_t *d)
+{
+    int32_t idx = 0;
+    v->tacho = buffer_get_int32(d, &idx);
+    v->v_in  = (float)buffer_get_int16(d, &idx) / 10.0f;
+    (void)buffer_get_int16(d, &idx);  /* reserved / motor_id field */
+}
+
+static void decode_status6(vesc_t *v, const uint8_t *d)
+{
+    int32_t idx = 0;
+    v->adc_1 = (float)buffer_get_int16(d, &idx) / 1000.0f;
+    v->adc_2 = (float)buffer_get_int16(d, &idx) / 1000.0f;
+    v->adc_3 = (float)buffer_get_int16(d, &idx) / 1000.0f;
+    v->ppm   = (float)buffer_get_int16(d, &idx) / 1000.0f;
+}
+
+/* --------------------------------------------------------------------------
+ * CAN_RxMessageCallback — overrides the __weak default in can_queue.c.
+ * Called from interrupt context (CAN_USE_INTERRUPTS=1) or from CanQueue_Poll
+ * (CAN_USE_INTERRUPTS=0) for every received frame.
+ *
+ * VESC extended ID format: bits[7:0]  = controller node ID
+ *                          bits[15:8] = CAN_PACKET_ID
+ * -------------------------------------------------------------------------- */
+void CAN_RxMessageCallback(CanRxMessage_t *msg)
+{
+    if (msg->idType != FDCAN_EXTENDED_ID) return;
+
+    uint8_t        node_id    = (uint8_t)(msg->id & 0xFF);
+    CAN_PACKET_ID  packet_id  = (CAN_PACKET_ID)((msg->id >> 8) & 0xFF);
+
+    vesc_t *v = vesc_node_lookup(node_id);
+    if (v == NULL) return;
+
+    switch (packet_id)
+    {
+    case CAN_PACKET_STATUS:   decode_status1(v, msg->data); break;
+    case CAN_PACKET_STATUS_2: decode_status2(v, msg->data); break;
+    case CAN_PACKET_STATUS_3: decode_status3(v, msg->data); break;
+    case CAN_PACKET_STATUS_4: decode_status4(v, msg->data); break;
+    case CAN_PACKET_STATUS_5: decode_status5(v, msg->data); break;
+    case CAN_PACKET_STATUS_6: decode_status6(v, msg->data); break;
+    default: return;  /* not a status packet — ignore */
+    }
+
+    v->connected    = 1;
+    v->last_rx_tick = HAL_GetTick();
+}
+
+/* --------------------------------------------------------------------------
+ * Data accessors
+ * -------------------------------------------------------------------------- */
+const vesc_t *VescGetNode(uint8_t node_id)
+{
+    return vesc_node_lookup(node_id);
+}
+
+int VescGetReport(uint8_t node_id, vesc_t *out)
+{
+    if (out == NULL) return -1;
+    const vesc_t *v = vesc_node_lookup(node_id);
+    if (v == NULL) return -1;
+    *out = *v;
+    return 0;
+}
+
+void VescGetAllReports(vesc_t out[VESC_COUNT])
+{
+    for (uint8_t i = 0; i < VESC_COUNT; i++)
+        out[i] = vescData[i];
+}
+
+void VescGetStatus1All(vesc_status1_t out[VESC_COUNT])
+{
+    for (uint8_t i = 0; i < VESC_COUNT; i++)
+    {
+        out[i].node_id   = vescData[i].node_id;
+        out[i].rpm       = vescData[i].rpm;
+        out[i].current   = vescData[i].current;
+        out[i].duty      = vescData[i].duty;
+        out[i].connected = vescData[i].connected;
+    }
 }
 
 /* --------------------------------------------------------------------------
@@ -111,6 +273,13 @@ int VescInit(FDCAN_HandleTypeDef *hfdcan)
     FDCAN_FilterTypeDef sFilterConfig;
 
     vescCanHandle = hfdcan;
+
+    for (uint8_t i = 0; i < VESC_COUNT; i++)
+    {
+        vesc_t *v       = &vescData[i];
+        memset(v, 0, sizeof(vesc_t));
+        v->node_id = kVescNodeIds[i];
+    }
 
     sFilterConfig.IdType       = FDCAN_EXTENDED_ID;
     sFilterConfig.FilterIndex  = 0;
@@ -163,6 +332,10 @@ void VescPoll(void)
     case ROVER_ESTOP:
     case ROVER_STEER_ONLY:
         AllStop();
+        break;
+
+    /* ---- VESC output suppressed — do not send any CAN commands ---- */
+    case ROVER_PROGRAM_VESCS:
         break;
 
     /* ---- Tier 1: straight forward — wait for steering ---- */

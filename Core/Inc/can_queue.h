@@ -40,10 +40,13 @@
 #define CAN_BUS_OFF_RECOVERY_MS     1000
 
 /* Maximum number of messages held in the circular TX queue. */
-#define CAN_QUEUE_MAX_MESSAGES      16
+#define CAN_QUEUE_MAX_MESSAGES      50
 
 /* Maximum data bytes per CAN frame (classic CAN = 8). */
 #define CAN_MAX_DATA_BYTES          8
+
+/* Maximum number of messages held in the circular RX queue. */
+#define CAN_RX_QUEUE_MAX_MESSAGES   50
 
 /* ==========================================================================
  * Types
@@ -61,6 +64,21 @@ typedef struct {
     volatile uint8_t tail;
     volatile uint8_t count;
 } CanQueue_t;
+
+typedef struct {
+    FDCAN_HandleTypeDef *hfdcan;
+    uint32_t             id;
+    uint8_t              idType;  // FDCAN_STANDARD_ID or FDCAN_EXTENDED_ID
+    uint8_t              data[CAN_MAX_DATA_BYTES];
+    uint8_t              len;
+} CanRxMessage_t;
+
+typedef struct {
+    CanRxMessage_t   buffer[CAN_RX_QUEUE_MAX_MESSAGES];
+    volatile uint8_t head;
+    volatile uint8_t tail;
+    volatile uint8_t count;
+} CanRxQueue_t;
 
 typedef enum {
     CAN_BUS_OK     = 0,
@@ -102,17 +120,38 @@ void CAN_HardwareStart(FDCAN_HandleTypeDef *hfdcan);
 void CanQueue_Init(void);
 
 /* ==========================================================================
- * Queue API
+ * TX Queue API
  * ========================================================================== */
 uint8_t CanQueue_Enqueue(FDCAN_HandleTypeDef *hfdcan, uint32_t id, const uint8_t *data, uint8_t len);
 void    CanQueue_TxNext(void);
 uint8_t CanQueue_IsBusy(void);
 
 /* Must be called from the main loop.
- * When CAN_USE_INTERRUPTS=1 this acts as a safety drain in case the FIFO
- * empty callback is missed. When CAN_USE_INTERRUPTS=0 this is the sole
- * mechanism that drains the queue. */
+ * When CAN_USE_INTERRUPTS=1 this acts as a safety drain for TX and RX in
+ * case FIFO callbacks are missed. When CAN_USE_INTERRUPTS=0 this is the
+ * sole mechanism that drains both queues. */
 void    CanQueue_Poll(void);
+
+/* ==========================================================================
+ * RX Queue API
+ * ========================================================================== */
+
+/* Returns the number of unread messages in the RX queue. */
+uint8_t CanRx_Available(void);
+
+/* Pops the oldest message from the RX queue into *out.
+ * Returns 1 on success, 0 if the queue is empty or out is NULL. */
+uint8_t CanRx_Dequeue(CanRxMessage_t *out);
+
+/* Weak application callback fired for every received frame.
+ * The default implementation pushes the message into the RX queue so it
+ * can be retrieved later with CanRx_Dequeue().
+ * Override this anywhere in the project to handle messages directly
+ * (e.g., to dispatch by ID without the intermediate queue).
+ * When CAN_USE_INTERRUPTS=1 this is called from interrupt context -
+ * keep implementations short. When CAN_USE_INTERRUPTS=0 it is called
+ * from CanQueue_Poll() in main context. */
+void CAN_RxMessageCallback(CanRxMessage_t *msg);
 
 /* ==========================================================================
  * Transmit entry point

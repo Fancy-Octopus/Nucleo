@@ -34,6 +34,8 @@
  *   TELEM_DRIVE    0x82  [state:u8][flags:u8]                                               4 bytes
  *   TELEM_STATE    0x83  [state:u8]                                                         3 bytes
  *   ACK_CMD        0x84  [accepted:u8][reason:u8][current_state:u8]                         5 bytes
+ *   TELEM_VESC     0x85  [connected:u8][rpm:i32le][current:f32le][duty:f32le] × 6          80 bytes
+ *                        VESCs in fixed order: FD(5) BD(6) BL(10) BR(11) FL(12) FR(13)
  *
  *   flags (TELEM_ALL / TELEM_DRIVE): bit0=wheels_ready  bit1=force_state  bit2=link_active
  *   steer_flags (TELEM_STEERING):    bit0=link_active  bit1=homed  bit2=homing
@@ -52,6 +54,7 @@
 #define QUERY_STEERING  0x81U
 #define QUERY_DRIVE     0x82U
 #define QUERY_STATE     0x83U
+#define QUERY_VESC      0x85U
 
 /* ---- Command acknowledgement (H5 → client, unsolicited after every command) ---- */
 #define ACK_CMD              0x84U
