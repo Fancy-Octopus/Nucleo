@@ -125,9 +125,11 @@ void ControllerPoll(void)
     index++;
     lastTime = HAL_GetTick();
 
-    /* Command watchdog — revert to safe default if no command received */
+    /* Command watchdog — revert to safe default if no command received.
+     * Sticky states (ESTOP, PROGRAM_VESCS) must not be cleared by the watchdog;
+     * only an explicit ROVER_IDLE request may exit them. */
     if (ScheduleReady(commandExpiration)) {
-        if (!estopActive)
+        if (!estopActive && !programVescsActive)
             roverState = defaultState;
     }
 }
